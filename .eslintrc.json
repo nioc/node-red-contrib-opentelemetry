@@ -1,0 +1,26 @@
+{
+    "env": {
+        "browser": true,
+        "commonjs": true,
+        "es2021": true,
+        "node": true
+    },
+    "plugins": [
+        "html"
+    ],
+    "extends": [
+        "standard",
+        "plugin:security/recommended",
+        "plugin:node/recommended",
+        "plugin:promise/recommended",
+        "plugin:import/errors",
+        "plugin:import/warnings"
+    ],
+    "parserOptions": {
+        "ecmaVersion": 12
+    },
+    "rules": {
+        "comma-dangle": ["error", "always-multiline"],
+        "no-undef": "off"
+    }
+}

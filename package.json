@@ -1,0 +1,47 @@
+{
+  "name": "node-red-contrib-opentelemetry",
+  "version": "1.0.0",
+  "description": "Distributed tracing with OpenTelemetry SDK for Node-RED",
+  "scripts": {
+    "lint": "eslint . --fix"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "keywords": [
+    "node-RED",
+    "OpenTelemetry",
+    "tracing"
+  ],
+  "author": "nioc <dev@nioc.eu>",
+  "license": "AGPL-3.0-or-later",
+  "homepage": "https://github.com/nioc/node-red-contrib-opentelemetry",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nioc/node-red-contrib-opentelemetry.git"
+  },
+  "bugs": "https://github.com/nioc/node-red-contrib-opentelemetry/issues",
+  "node-red": {
+    "nodes": {
+      "opentelemetry": "lib/opentelemetry-node.js"
+    }
+  },
+  "devDependencies": {
+    "eslint": "^8.35.0",
+    "eslint-config-standard": "^17.0.0",
+    "eslint-plugin-html": "^7.1.0",
+    "eslint-plugin-import": "^2.27.5",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-promise": "^6.0.1",
+    "eslint-plugin-security": "^1.7.1"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.4.0",
+    "@opentelemetry/exporter-prometheus": "^0.35.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.35.1",
+    "@opentelemetry/resources": "^1.9.1",
+    "@opentelemetry/sdk-metrics": "^1.9.1",
+    "@opentelemetry/sdk-trace-base": "^1.9.1",
+    "@opentelemetry/semantic-conventions": "^1.9.1"
+  }
+}

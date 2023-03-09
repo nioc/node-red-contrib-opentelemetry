@@ -1,0 +1,105 @@
+<!--  OpenTelemetry node -->
+<script type="text/javascript">
+RED.nodes.registerType('OpenTelemetry', {
+  category: 'Tracing',
+  paletteLabel: 'OTEL',
+  icon: 'opentelemetry.svg',
+  color: '#f5a800',
+  defaults: {
+    name: {
+      value: '',
+    },
+    url: {
+      value: 'http://localhost:4318/v1/traces',
+      required: true,
+      validate: function (v) {
+        try {
+          // eslint-disable-next-line no-new
+          new URL(v)
+          return true
+        } catch (err) {
+          return false
+        }
+      },
+    },
+    serviceName: {
+      value: 'Node-RED',
+      required: true,
+    },
+    rootPrefix: {
+      value: 'Message ',
+    },
+    timeout: {
+      value: 10,
+      required: true,
+    },
+    ignoredTypes: {
+      value: 'debug,catch',
+    },
+    propagateHeadersTypes: {
+      value: '',
+    },
+    isLogging: {
+      value: false,
+    },
+  },
+  label: function () {
+    return this.name || 'OpenTelemetry'
+  },
+})
+</script>
+
+<script type="text/html" data-template-name="OpenTelemetry">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name">
+  </div>
+  <hr/>
+  <div class="form-row" title="OpenTelemetry exporter endpoint">
+    <label for="node-input-url"><i class="fa fa-globe"></i> Url</label>
+    <input type="text" id="node-input-url" placeholder="http://localhost:4318/v1/traces">
+  </div>
+  <div class="form-row" title="OpenTelemetry service name">
+    <label for="node-input-serviceName"><i class="fa fa-server"></i> Service</label>
+    <input type="text" id="node-input-serviceName" placeholder="Node-RED">
+  </div>
+  <div class="form-row" title="Prefix added in the root Node-RED span name before initial node name">
+    <label for="node-input-rootPrefix"><i class="fa fa-tag"></i> Root prefix</label>
+    <input type="text" id="node-input-rootPrefix" placeholder="Message ">
+  </div>
+  <div class="form-row" title="Do not trace nodes of these types">
+    <label for="node-input-ignoredTypes"><i class="fa fa-ban"></i> Ignored</label>
+    <input type="text" id="node-input-ignoredTypes" placeholder="debug,catch">
+  </div>
+  <div class="form-row" title="Forward trace headers on these types of nodes">
+    <label for="node-input-propagateHeadersTypes"><i class="fa fa-suitcase"></i> Propagate</label>
+    <input type="text" id="node-input-propagateHeadersTypes" placeholder="mycustomnode,othernode">
+  </div>
+  <div class="form-row" title="Time in seconds after which an unmodified message will be ended and deleted">
+    <label for="node-input-timeout"><i class="fa fa-hourglass"></i> Timeout</label>
+    <input type="number" id="node-input-timeout" placeholder="10">
+  </div>
+  <div class="form-row" title="Send debug logs to the console">
+    <label for="node-input-isLogging"><i class="fa fa-bug"></i> Debug log</label>
+    <input type="checkbox" id="node-input-isLogging" style="display: inline-block; width: auto; vertical-align: top;">
+  </div>
+</script>
+
+<script type="text/html" data-help-name="OpenTelemetry">
+  <p>Send Node-RED traces to OpenTelemetry collector (like Jaeger or Zipkin).</p>
+  <h3>Details</h3>
+  <p>With this node enabled, each message will generate a trace composed of the traces (spans) of each node traversed.</p>
+  <p>You must set:<ul>
+    <li>the <code>url</code> of the exporter,</li>
+    <li>the <code>service</code> name displayed in your visualization tool,</li>
+    <li>optional <code>root prefix</code> that will be added to the root Node-RED span name before the initial node name,</li>
+    <li>optional comma-separated list of <code>ignored</code> nodes that will not emit a trace,</li>
+    <li>optional comma-separated list of node types that will <code>propagate</code> traces using request headers (W3C trace context propagation).</li>
+  </ul></p>
+  <p>This node should only be added once for all your Node-Red flows (regardless of location).</p>
+  <h3>References</h3>
+  <ul>
+    <li><a href="https://opentelemetry.io/docs/" target="_blank"rel="noopener noreferrer">OpenTelemetry docs</a> - full description of OpenTelemetry.</li>
+    <li><a href="https://github.com/nioc/node-red-contrib-opentelemetry" target="_blank"rel="noopener noreferrer">Node homepage</a> - doc, issues and releases.</li>
+  </ul>
+</script>
