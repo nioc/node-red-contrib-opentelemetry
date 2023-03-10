@@ -9,8 +9,8 @@
     "node": ">=14.0.0"
   },
   "keywords": [
-    "node-RED",
-    "OpenTelemetry",
+    "node-red",
+    "opentelemetry",
     "tracing"
   ],
   "author": "nioc <dev@nioc.eu>",
