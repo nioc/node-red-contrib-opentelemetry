@@ -22,7 +22,7 @@ Distributed tracing with OpenTelemetry SDK for Node-RED.
   - optionally `http status code` (for request node type),
   - optionally `exception`.
 
-![Example](https://github.com/nioc/node-red-contrib-opentelemetry/blob/master/docs/Screenshot_01.png "Example")
+![Example](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_01.png "Example")
 
 ## Installation
 
