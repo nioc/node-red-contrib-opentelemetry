@@ -1,0 +1,26 @@
+[
+  {
+      "id": "1dc4c3fe2e38934c",
+      "type": "tab",
+      "label": "OpenTelemetry",
+      "disabled": false,
+      "info": "This is an example of a flow for the OpenTelemetry node.",
+      "env": []
+  },
+  {
+      "id": "ac125c4c6d10643e",
+      "type": "OpenTelemetry",
+      "z": "1dc4c3fe2e38934c",
+      "name": "",
+      "url": "http://localhost:4318/v1/traces",
+      "serviceName": "Node-RED",
+      "rootPrefix": "Message",
+      "timeout": "10",
+      "ignoredTypes": "debug,catch",
+      "propagateHeadersTypes": "",
+      "isLogging": false,
+      "x": 760,
+      "y": 160,
+      "wires": []
+  }
+]
