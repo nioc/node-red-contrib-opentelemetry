@@ -31,6 +31,8 @@ Search `node-red-contrib-opentelemetry` within the palette manager or install wi
 npm install node-red-contrib-opentelemetry
 ```
 
+As with every [node installation](https://nodered.org/docs/user-guide/runtime/adding-nodes), you will need to restart Node-RED for it to pick-up the new nodes.
+
 ## Usage
 
 - Add OTEL node **once** (to any flow),
@@ -47,6 +49,13 @@ npm install node-red-contrib-opentelemetry
 node-red-contrib-opentelemetry is maintained under the [semantic versioning](https://semver.org/) guidelines.
 
 See the [releases](https://github.com/nioc/node-red-contrib-opentelemetry/releases) on this repository for changelog.
+
+## Contributors
+
+- **[Nioc](https://github.com/nioc/)** - _Initial work_
+- **[Wodka](https://github.com/wodka/)** - _AMQP headers and `CompositePropagator` (Jaeger, W3C, B3)_
+
+See also the full list of [contributors](https://github.com/nioc/node-red-contrib-opentelemetry/graphs/contributors) to this project.
 
 ## License
 
