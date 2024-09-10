@@ -41,6 +41,7 @@
     "@opentelemetry/core": "^1.18.1",
     "@opentelemetry/exporter-prometheus": "^0.45.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.45.1",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.53.0",
     "@opentelemetry/propagator-b3": "^1.18.1",
     "@opentelemetry/propagator-jaeger": "^1.18.1",
     "@opentelemetry/resources": "^1.18.1",

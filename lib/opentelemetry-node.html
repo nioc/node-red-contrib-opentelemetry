@@ -26,6 +26,10 @@ RED.nodes.registerType('OpenTelemetry', {
       value: 'Node-RED',
       required: true,
     },
+    protocol: {
+      value: 'http',
+      required: true,
+    },
     rootPrefix: {
       value: 'Message ',
     },
@@ -58,6 +62,13 @@ RED.nodes.registerType('OpenTelemetry', {
   <div class="form-row" title="OpenTelemetry exporter endpoint">
     <label for="node-input-url"><i class="fa fa-globe"></i> Url</label>
     <input type="text" id="node-input-url" placeholder="http://localhost:4318/v1/traces">
+  </div>
+  <div class="form-row" title="OpenTelemetry exporter protocol">
+    <label for="node-input-protocol"><i class="fa fa-globe"></i> Protocol</label>
+    <select id="node-input-protocol">
+      <option value="http">http</option>
+      <option value="proto">proto</option>
+    </select>
   </div>
   <div class="form-row" title="OpenTelemetry service name">
     <label for="node-input-serviceName"><i class="fa fa-server"></i> Service</label>
