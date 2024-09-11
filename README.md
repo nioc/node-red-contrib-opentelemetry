@@ -55,6 +55,7 @@ See the [releases](https://github.com/nioc/node-red-contrib-opentelemetry/releas
 - **[Nioc](https://github.com/nioc/)** - _Initial work_
 - **[Wodka](https://github.com/wodka/)** - _AMQP headers and `CompositePropagator` (Jaeger, W3C, B3)_
 - **[Akrpic77](https://github.com/akrpic77/)** - _MQTT v5 context fields_
+- **[joshendriks](https://github.com/joshendriks/)** - _Protobuf trace-exporter support_
 
 See also the full list of [contributors](https://github.com/nioc/node-red-contrib-opentelemetry/graphs/contributors) to this project.
 
