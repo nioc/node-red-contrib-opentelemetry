@@ -1,0 +1,88 @@
+<!--  Prometheus node -->
+<script type="text/javascript">
+RED.nodes.registerType('Prometheus Exporter', {
+  category: 'Tracing',
+  paletteLabel: 'Prometheus',
+  icon: 'prometheus.svg',
+  color: '#E66F51',
+  defaults: {
+    name: {
+      value: 'Prometheus',
+    },
+    endpoint: {
+      value: '/metrics',
+      required: true,
+      validate: function (v) {
+        try {
+          // eslint-disable-next-line no-new
+          new URL(`http://localhost:1881${v}`)
+          return true
+        } catch (err) {
+          return false
+        }
+      },
+    },
+    port: {
+      value: 1881,
+      required: true,
+    },
+    serviceName: {
+      value: 'Node-RED',
+      required: true,
+    },
+    instrumentName: {
+      value: 'http_request_duration',
+      required: true,
+    },
+  },
+  label: function () {
+    return this.name || 'Prometheus exporter'
+  },
+})
+</script>
+
+<script type="text/html" data-template-name="Prometheus Exporter">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Prometheus exporter">
+  </div>
+  <hr/>
+  <div class="form-row">
+    <label for="node-input-port"><i class="fa fa-globe"></i> Port</label>
+    <input type="number" id="node-input-port" style="width: 70px;" placeholder="1881" title="Prometheus scraping port (1881)">
+    <label for="node-input-endpoint" style="margin-left:20px; width:62px;">Endpoint</label>
+    <input type="text" id="node-input-endpoint" style="width: calc(70% - 160px);" placeholder="/metrics" title="Prometheus scraping endpoint (/metrics)">
+  </div>
+  <div class="form-row" title="Prometheus service name (Node-RED)">
+    <label for="node-input-serviceName"><i class="fa fa-tag"></i> Service</label>
+    <input type="text" id="node-input-serviceName" placeholder="Node-RED">
+  </div>
+  <div class="form-row" title="Prometheus instrument name (http_request_duration)">
+    <label for="node-input-instrumentName"><i class="fa fa-tag"></i> Instrument</label>
+    <input type="text" id="node-input-instrumentName" placeholder="http_request_duration">
+  </div>
+</script>
+
+<script type="text/html" data-help-name="Prometheus Exporter">
+  <p>Collect http in requests metrics (count, duration) and start an export server for Prometheus scraping.</p>
+  <h3>Details</h3>
+  <p>With this node enabled, every http request processed by an http in node will be counted to measure response times.</p>
+  <p>You must set:<ul>
+    <li>the <code>port</code> and the <code>endpoint</code> of the export server (which will be scraped by your Prometheus),</li>
+    <li>the <code>service</code> name displayed,</li>
+    <li>the <code>instrument</code> name displayed.</li>
+  </ul></p>
+  <p>This node should only be added once for all your Node-Red flows (regardless of location).</p>
+  <p>In order to measure requests, it is necessary to edit <code>httpNodeMiddleware</code> in your <code>settings.js</code> file:</p>
+  <pre>
+    const { prometheusMiddleware } = require('node-red-contrib-opentelemetry/lib/prometheus-exporter.js')
+    // ...
+    httpNodeMiddleware: prometheusMiddleware,
+    // ...
+  </pre>
+  <h3>References</h3>
+  <ul>
+    <li><a href="https://opentelemetry.io/docs/concepts/signals/metrics/" target="_blank" rel="noopener noreferrer">OpenTelemetry docs</a> - full description of OpenTelemetry.</li>
+    <li><a href="https://github.com/nioc/node-red-contrib-opentelemetry" target="_blank" rel="noopener noreferrer">Node homepage</a> - doc, issues and releases.</li>
+  </ul>
+</script>

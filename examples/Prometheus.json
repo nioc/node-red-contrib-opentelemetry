@@ -1,0 +1,23 @@
+[
+  {
+      "id": "1dc4c3fe2e38934c",
+      "type": "tab",
+      "label": "Prometheus exporter",
+      "disabled": false,
+      "info": "This is an example of a flow for the Prometheus node.",
+      "env": []
+  },
+  {
+      "id": "9a4cbf20508e704a",
+      "type": "Prometheus Exporter",
+      "z": "1dc4c3fe2e38934c",
+      "name": "Prometheus",
+      "endpoint": "/metrics",
+      "port": 1881,
+      "serviceName": "Node-RED",
+      "instrumentName": "http_request_duration",
+      "x": 330,
+      "y": 140,
+      "wires": []
+  }
+]
