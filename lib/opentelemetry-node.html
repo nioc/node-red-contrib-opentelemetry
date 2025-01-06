@@ -46,9 +46,76 @@ RED.nodes.registerType('OpenTelemetry', {
     isLogging: {
       value: false,
     },
+    attributeMappings: {
+      value: [],
+      validate: function (attributeMappings) {
+        if (!attributeMappings || attributeMappings.length === 0) {
+          return true
+        }
+        const errors = []
+        attributeMappings.forEach((attributeMapping) => {
+          if (attributeMapping.key === '') {
+            errors.push('OTEL key must be a non-null string')
+          }
+          if (attributeMapping.path === '') {
+            errors.push('Path must be a non-null string')
+          }
+        })
+        if (errors.length) {
+          console.warn(errors.join(', '))
+          return errors
+        }
+        return true
+      },
+    },
   },
   label: function () {
     return this.name || 'OpenTelemetry'
+  },
+  oneditprepare: function () {
+    $('#node-input-attributeMapping-container').css('min-height', '150px').css('min-width', '450px').editableList({
+      addItem: function (container, i, opt) {
+        if (!Object.prototype.hasOwnProperty.call(opt, 'attributeMapping')) {
+          opt.attributeMapping = {
+            flow: '',
+            key: '',
+            path: '',
+          }
+        }
+        container.css({
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+        })
+        const inputRows = $('<div></div>', { style: 'flex-grow:1' }).appendTo(container)
+        $('<input/>', { class: 'node-input-attributeMapping-flow', type: 'text', style: 'width: 32%;', placeholder: 'Flow id or empty for all flows', value: opt.attributeMapping.flow }).appendTo(inputRows)
+        $('<input/>', { class: 'node-input-attributeMapping-key', type: 'text', style: 'width: 32%; margin: 0 5px;', placeholder: 'OTEL attribute key', value: opt.attributeMapping.key }).appendTo(inputRows)
+        $('<input/>', { class: 'node-input-attributeMapping-path', type: 'text', style: 'width: 32%;', placeholder: 'Msg path to data', value: opt.attributeMapping.path }).appendTo(inputRows)
+      },
+      sortable: false,
+      removable: true,
+    })
+    // sort and display attributes
+    this.attributeMappings
+      .sort((a, b) => {
+        if (a.flow === b.flow) {
+          return a.key > b.key
+        }
+        return a.flow > b.flow
+      })
+      .forEach((attributeMapping) => {
+        $('#node-input-attributeMapping-container').editableList('addItem', { attributeMapping })
+      })
+  },
+  oneditsave: function () {
+    const node = this
+    node.attributeMappings = []
+    $('#node-input-attributeMapping-container').editableList('items').each(function () {
+      node.attributeMappings.push({
+        flow: this.find('.node-input-attributeMapping-flow').val(),
+        key: this.find('.node-input-attributeMapping-key').val(),
+        path: this.find('.node-input-attributeMapping-path').val(),
+      })
+    })
   },
 })
 </script>
@@ -94,6 +161,13 @@ RED.nodes.registerType('OpenTelemetry', {
     <label for="node-input-isLogging"><i class="fa fa-bug"></i> Debug log</label>
     <input type="checkbox" id="node-input-isLogging" style="display: inline-block; width: auto; vertical-align: top;">
   </div>
+  <hr/>
+  <div class="form-row" style="margin-bottom:0;">
+    <label style="width: 100%;"><i class="fa fa-list"></i> <span> Span attribute mappings</span></label>
+  </div>
+  <div class="form-row node-input-attributeMapping-container-row">
+    <ol id="node-input-attributeMapping-container"></ol>
+  </div>
 </script>
 
 <script type="text/html" data-help-name="OpenTelemetry">
@@ -106,6 +180,11 @@ RED.nodes.registerType('OpenTelemetry', {
     <li>optional <code>root prefix</code> that will be added to the root Node-RED span name before the initial node name,</li>
     <li>optional comma-separated list of <code>ignored</code> nodes that will not emit a trace,</li>
     <li>optional comma-separated list of node types that will <code>propagate</code> traces using request headers (W3C trace context propagation).</li>
+  </ul></p>
+  <p>You can add your own attributes to the generated spans by adding:<ul>
+    <li>the <code>flow</code> involved (you can leave this field empty to use in all flows),</li>
+    <li>an <a href="https://opentelemetry.io/docs/concepts/signals/traces/#attributes" target="_blank" rel="noopener noreferrer">OTEL span attribute <code>key</code></a> (<code>node_red.action</code> for example)</li>
+    <li>the <code>path</code> in the processed message object in <a href="https://jmespath.org/" target="_blank" rel="noopener noreferrer">JMESPath syntax</a>, starting after <code>msg.</code> (<code>payload.action</code> for example)</li>
   </ul></p>
   <p>This node should only be added once for all your Node-Red flows (regardless of location).</p>
   <h3>References</h3>

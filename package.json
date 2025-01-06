@@ -1,6 +1,6 @@
 {
   "name": "node-red-contrib-opentelemetry",
-  "version": "1.4.0",
+  "version": "1.5.0-beta.1",
   "description": "Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for Node-RED",
   "scripts": {
     "lint": "eslint . --fix"
@@ -49,9 +49,7 @@
     "@opentelemetry/sdk-metrics": "^1.30.0",
     "@opentelemetry/sdk-trace-base": "^1.30.0",
     "@opentelemetry/semantic-conventions": "^1.18.1",
+    "jmespath": "^0.16.0",
     "on-finished": "^2.4.1"
-  },
-  "peerDependencies": {
-    "jsonata": "^2.0.6"
   }
 }
