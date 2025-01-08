@@ -1,5 +1,14 @@
 <!--  OpenTelemetry node -->
 <script type="text/javascript">
+function sortAttributeMappings (a, b) {
+  if (a.flow === b.flow) {
+    if (a.nodeType === b.nodeType) {
+      return a.key > b.key
+    }
+    return a.nodeType > b.nodeType
+  }
+  return a.flow > b.flow
+}
 RED.nodes.registerType('OpenTelemetry', {
   category: 'Tracing',
   paletteLabel: 'OTEL',
@@ -78,6 +87,7 @@ RED.nodes.registerType('OpenTelemetry', {
         if (!Object.prototype.hasOwnProperty.call(opt, 'attributeMapping')) {
           opt.attributeMapping = {
             flow: '',
+            nodeType: '',
             key: '',
             path: '',
           }
@@ -87,35 +97,32 @@ RED.nodes.registerType('OpenTelemetry', {
           whiteSpace: 'nowrap',
         })
         const inputRows = $('<div></div>', { style: 'flex-grow:1' }).appendTo(container)
-        $('<input/>', { class: 'node-input-attributeMapping-flow', type: 'text', style: 'width: 32%;', placeholder: 'Flow id or empty for all flows', value: opt.attributeMapping.flow }).appendTo(inputRows)
-        $('<input/>', { class: 'node-input-attributeMapping-key', type: 'text', style: 'width: 32%; margin: 0 5px;', placeholder: 'OTEL attribute key', value: opt.attributeMapping.key }).appendTo(inputRows)
-        $('<input/>', { class: 'node-input-attributeMapping-path', type: 'text', style: 'width: 32%;', placeholder: 'Msg path to data', value: opt.attributeMapping.path }).appendTo(inputRows)
+        $('<input/>', { class: 'node-input-attributeMapping-flow', type: 'text', style: 'width: 24%;', placeholder: 'Flow id or empty for all flows', title: 'Flow id or empty for all flows', value: opt.attributeMapping.flow }).appendTo(inputRows)
+        $('<input/>', { class: 'node-input-attributeMapping-nodeType', type: 'text', style: 'width: 24%; margin: 0 5px;', placeholder: 'Node type or empty for all types', title: 'Node type or empty for all types', value: opt.attributeMapping.nodeType }).appendTo(inputRows)
+        $('<input/>', { class: 'node-input-attributeMapping-key', type: 'text', style: 'width: 24%; margin: 0 5px;', placeholder: 'OTEL attribute key', title: 'OTEL attribute key', value: opt.attributeMapping.key }).appendTo(inputRows)
+        $('<input/>', { class: 'node-input-attributeMapping-path', type: 'text', style: 'width: 24%;', placeholder: 'Msg path to data', title: 'Msg path to data', value: opt.attributeMapping.path }).appendTo(inputRows)
       },
       sortable: false,
       removable: true,
     })
     // sort and display attributes
     this.attributeMappings
-      .sort((a, b) => {
-        if (a.flow === b.flow) {
-          return a.key > b.key
-        }
-        return a.flow > b.flow
-      })
+      .sort(sortAttributeMappings)
       .forEach((attributeMapping) => {
         $('#node-input-attributeMapping-container').editableList('addItem', { attributeMapping })
       })
   },
   oneditsave: function () {
-    const node = this
-    node.attributeMappings = []
+    const attributeMappings = []
     $('#node-input-attributeMapping-container').editableList('items').each(function () {
-      node.attributeMappings.push({
+      attributeMappings.push({
         flow: this.find('.node-input-attributeMapping-flow').val(),
+        nodeType: this.find('.node-input-attributeMapping-nodeType').val(),
         key: this.find('.node-input-attributeMapping-key').val(),
         path: this.find('.node-input-attributeMapping-path').val(),
       })
     })
+    this.attributeMappings = attributeMappings.sort(sortAttributeMappings)
   },
 })
 </script>
@@ -182,7 +189,8 @@ RED.nodes.registerType('OpenTelemetry', {
     <li>optional comma-separated list of node types that will <code>propagate</code> traces using request headers (W3C trace context propagation).</li>
   </ul></p>
   <p>You can add your own attributes to the generated spans by adding:<ul>
-    <li>the <code>flow</code> involved (you can leave this field empty to use in all flows),</li>
+    <li>the <code>flow</code> identifier involved (you can leave this field empty to use in all flows),</li>
+    <li>the <code>nodeType</code> involved (examples: `http in`, `http request`, `file in`, ... , you can leave this field empty to use in all node types),</li>
     <li>an <a href="https://opentelemetry.io/docs/concepts/signals/traces/#attributes" target="_blank" rel="noopener noreferrer">OTEL span attribute <code>key</code></a> (<code>node_red.action</code> for example)</li>
     <li>the <code>path</code> in the processed message object in <a href="https://jmespath.org/" target="_blank" rel="noopener noreferrer">JMESPath syntax</a>, starting after <code>msg.</code> (<code>payload.action</code> for example)</li>
   </ul></p>
