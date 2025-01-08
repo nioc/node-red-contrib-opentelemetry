@@ -190,7 +190,7 @@ RED.nodes.registerType('OpenTelemetry', {
   </ul></p>
   <p>You can add your own attributes to the generated spans by adding:<ul>
     <li>the <code>flow</code> identifier involved (you can leave this field empty to use in all flows),</li>
-    <li>the <code>nodeType</code> involved (examples: `http in`, `http request`, `file in`, ... , you can leave this field empty to use in all node types),</li>
+    <li>the <code>nodeType</code> involved (examples: <code>http in</code>, <code>http request</code>, <code>file in</code>, ... , you can leave this field empty to use in all node types),</li>
     <li>an <a href="https://opentelemetry.io/docs/concepts/signals/traces/#attributes" target="_blank" rel="noopener noreferrer">OTEL span attribute <code>key</code></a> (<code>node_red.action</code> for example)</li>
     <li>the <code>path</code> in the processed message object in <a href="https://jmespath.org/" target="_blank" rel="noopener noreferrer">JMESPath syntax</a>, starting after <code>msg.</code> (<code>payload.action</code> for example)</li>
   </ul></p>
