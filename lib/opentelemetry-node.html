@@ -1,4 +1,16 @@
 <!--  OpenTelemetry node -->
+<style>
+  .node-input-otelAttributeMapping {
+    flex-grow: 1 !important;
+  }
+  .node-input-otelAttributeMapping input {
+    width: calc(25% - 5px) !important;
+    margin-left: 5px !important;
+  }
+  .node-input-otelAttributeMapping-isAfterProcess {
+    width: 60px !important;
+  }
+</style>
 <script type="text/javascript">
 function sortAttributeMappings (a, b) {
   if (a.flow === b.flow) {
@@ -82,10 +94,11 @@ RED.nodes.registerType('OpenTelemetry', {
     return this.name || 'OpenTelemetry'
   },
   oneditprepare: function () {
-    $('#node-input-attributeMapping-container').css('min-height', '150px').css('min-width', '450px').editableList({
+    $('#node-input-otelAttributeMapping-container').css('min-height', '150px').css('min-width', '450px').editableList({
       addItem: function (container, i, opt) {
         if (!Object.prototype.hasOwnProperty.call(opt, 'attributeMapping')) {
           opt.attributeMapping = {
+            isAfter: false,
             flow: '',
             nodeType: '',
             key: '',
@@ -95,12 +108,27 @@ RED.nodes.registerType('OpenTelemetry', {
         container.css({
           overflow: 'hidden',
           whiteSpace: 'nowrap',
+          display: 'flex',
         })
-        const inputRows = $('<div></div>', { style: 'flex-grow:1' }).appendTo(container)
-        $('<input/>', { class: 'node-input-attributeMapping-flow', type: 'text', style: 'width: 24%;', placeholder: 'Flow id or empty for all flows', title: 'Flow id or empty for all flows', value: opt.attributeMapping.flow }).appendTo(inputRows)
-        $('<input/>', { class: 'node-input-attributeMapping-nodeType', type: 'text', style: 'width: 24%; margin: 0 5px;', placeholder: 'Node type or empty for all types', title: 'Node type or empty for all types', value: opt.attributeMapping.nodeType }).appendTo(inputRows)
-        $('<input/>', { class: 'node-input-attributeMapping-key', type: 'text', style: 'width: 24%; margin: 0 5px;', placeholder: 'OTEL attribute key', title: 'OTEL attribute key', value: opt.attributeMapping.key }).appendTo(inputRows)
-        $('<input/>', { class: 'node-input-attributeMapping-path', type: 'text', style: 'width: 24%;', placeholder: 'Msg path to data', title: 'Msg path to data', value: opt.attributeMapping.path }).appendTo(inputRows)
+        const selectField = $('<select/>', { class: 'node-input-otelAttributeMapping-isAfterProcess', title: 'Does the attribute should be parsed before or after node processing?' })
+        container.append(
+          selectField,
+          $('<div/>', { class: 'node-input-otelAttributeMapping' })
+            .append(
+              $('<input/>', { class: 'node-input-otelAttributeMapping-flow', type: 'text', placeholder: 'Flow id or empty for all flows', title: 'Flow id or empty for all flows', value: opt.attributeMapping.flow }),
+              $('<input/>', { class: 'node-input-otelAttributeMapping-nodeType', type: 'text', placeholder: 'Node type or empty for all types', title: 'Node type or empty for all types', value: opt.attributeMapping.nodeType }),
+              $('<input/>', { class: 'node-input-otelAttributeMapping-key', type: 'text', placeholder: 'OTEL attribute key', title: 'OTEL attribute key', value: opt.attributeMapping.key }),
+              $('<input/>', { class: 'node-input-otelAttributeMapping-path', type: 'text', placeholder: 'Msg path to data', title: 'Msg path to data', value: opt.attributeMapping.path }),
+            ),
+        )
+        const timings = [
+          { value: 'false', label: 'Start' },
+          { value: 'true', label: 'End' },
+        ]
+        timings.forEach(timing => {
+          selectField.append($('<option></option>').val(timing.value).text(timing.label))
+        })
+        selectField.val(`${opt.attributeMapping.isAfter}`)
       },
       sortable: false,
       removable: true,
@@ -109,17 +137,18 @@ RED.nodes.registerType('OpenTelemetry', {
     this.attributeMappings
       .sort(sortAttributeMappings)
       .forEach((attributeMapping) => {
-        $('#node-input-attributeMapping-container').editableList('addItem', { attributeMapping })
+        $('#node-input-otelAttributeMapping-container').editableList('addItem', { attributeMapping })
       })
   },
   oneditsave: function () {
     const attributeMappings = []
-    $('#node-input-attributeMapping-container').editableList('items').each(function () {
+    $('#node-input-otelAttributeMapping-container').editableList('items').each(function () {
       attributeMappings.push({
-        flow: this.find('.node-input-attributeMapping-flow').val(),
-        nodeType: this.find('.node-input-attributeMapping-nodeType').val(),
-        key: this.find('.node-input-attributeMapping-key').val(),
-        path: this.find('.node-input-attributeMapping-path').val(),
+        isAfter: this.find('.node-input-otelAttributeMapping-isAfterProcess').val() === 'true',
+        flow: this.find('.node-input-otelAttributeMapping-flow').val(),
+        nodeType: this.find('.node-input-otelAttributeMapping-nodeType').val(),
+        key: this.find('.node-input-otelAttributeMapping-key').val(),
+        path: this.find('.node-input-otelAttributeMapping-path').val(),
       })
     })
     this.attributeMappings = attributeMappings.sort(sortAttributeMappings)
@@ -172,8 +201,8 @@ RED.nodes.registerType('OpenTelemetry', {
   <div class="form-row" style="margin-bottom:0;">
     <label style="width: 100%;"><i class="fa fa-list"></i> <span> Span attribute mappings</span></label>
   </div>
-  <div class="form-row node-input-attributeMapping-container-row">
-    <ol id="node-input-attributeMapping-container"></ol>
+  <div class="form-row node-input-otelAttributeMapping-container-row">
+    <ol id="node-input-otelAttributeMapping-container"></ol>
   </div>
 </script>
 
