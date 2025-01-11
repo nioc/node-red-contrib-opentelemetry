@@ -1,5 +1,26 @@
 <!--  OpenTelemetry node -->
+<style>
+  .node-input-otelAttributeMapping {
+    flex-grow: 1 !important;
+  }
+  .node-input-otelAttributeMapping input {
+    width: calc(25% - 5px) !important;
+    margin-left: 5px !important;
+  }
+  .node-input-otelAttributeMapping-isAfterProcess {
+    width: 60px !important;
+  }
+</style>
 <script type="text/javascript">
+function sortAttributeMappings (a, b) {
+  if (a.flow === b.flow) {
+    if (a.nodeType === b.nodeType) {
+      return a.key > b.key
+    }
+    return a.nodeType > b.nodeType
+  }
+  return a.flow > b.flow
+}
 RED.nodes.registerType('OpenTelemetry', {
   category: 'Tracing',
   paletteLabel: 'OTEL',
@@ -46,9 +67,91 @@ RED.nodes.registerType('OpenTelemetry', {
     isLogging: {
       value: false,
     },
+    attributeMappings: {
+      value: [],
+      validate: function (attributeMappings) {
+        if (!attributeMappings || attributeMappings.length === 0) {
+          return true
+        }
+        const errors = []
+        attributeMappings.forEach((attributeMapping) => {
+          if (attributeMapping.key === '') {
+            errors.push('OTEL key must be a non-null string')
+          }
+          if (attributeMapping.path === '') {
+            errors.push('Path must be a non-null string')
+          }
+        })
+        if (errors.length) {
+          console.warn(errors.join(', '))
+          return errors
+        }
+        return true
+      },
+    },
   },
   label: function () {
     return this.name || 'OpenTelemetry'
+  },
+  oneditprepare: function () {
+    $('#node-input-otelAttributeMapping-container').css('min-height', '150px').css('min-width', '450px').editableList({
+      addItem: function (container, i, opt) {
+        if (!Object.prototype.hasOwnProperty.call(opt, 'attributeMapping')) {
+          opt.attributeMapping = {
+            isAfter: false,
+            flow: '',
+            nodeType: '',
+            key: '',
+            path: '',
+          }
+        }
+        container.css({
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+          display: 'flex',
+        })
+        const selectField = $('<select/>', { class: 'node-input-otelAttributeMapping-isAfterProcess', title: 'Does the attribute should be parsed before or after node processing?' })
+        container.append(
+          selectField,
+          $('<div/>', { class: 'node-input-otelAttributeMapping' })
+            .append(
+              $('<input/>', { class: 'node-input-otelAttributeMapping-flow', type: 'text', placeholder: 'Flow id or empty for all flows', title: 'Flow id or empty for all flows', value: opt.attributeMapping.flow }),
+              $('<input/>', { class: 'node-input-otelAttributeMapping-nodeType', type: 'text', placeholder: 'Node type or empty for all types', title: 'Node type or empty for all types', value: opt.attributeMapping.nodeType }),
+              $('<input/>', { class: 'node-input-otelAttributeMapping-key', type: 'text', placeholder: 'OTEL attribute key', title: 'OTEL attribute key', value: opt.attributeMapping.key }),
+              $('<input/>', { class: 'node-input-otelAttributeMapping-path', type: 'text', placeholder: 'Msg path to data', title: 'Msg path to data', value: opt.attributeMapping.path }),
+            ),
+        )
+        const timings = [
+          { value: 'false', label: 'Start' },
+          { value: 'true', label: 'End' },
+        ]
+        timings.forEach(timing => {
+          selectField.append($('<option></option>').val(timing.value).text(timing.label))
+        })
+        selectField.val(`${opt.attributeMapping.isAfter}`)
+      },
+      sortable: false,
+      removable: true,
+    })
+    // sort and display attributes
+    this.attributeMappings
+      .sort(sortAttributeMappings)
+      .forEach((attributeMapping) => {
+        $('#node-input-otelAttributeMapping-container').editableList('addItem', { attributeMapping })
+      })
+  },
+  oneditsave: function () {
+    const attributeMappings = []
+    $('#node-input-otelAttributeMapping-container').editableList('items').each(function () {
+      attributeMappings.push({
+        isAfter: this.find('.node-input-otelAttributeMapping-isAfterProcess').val() === 'true',
+        flow: this.find('.node-input-otelAttributeMapping-flow').val(),
+        nodeType: this.find('.node-input-otelAttributeMapping-nodeType').val(),
+        key: this.find('.node-input-otelAttributeMapping-key').val(),
+        path: this.find('.node-input-otelAttributeMapping-path').val(),
+      })
+    })
+    this.attributeMappings = attributeMappings.sort(sortAttributeMappings)
   },
 })
 </script>
@@ -94,6 +197,13 @@ RED.nodes.registerType('OpenTelemetry', {
     <label for="node-input-isLogging"><i class="fa fa-bug"></i> Debug log</label>
     <input type="checkbox" id="node-input-isLogging" style="display: inline-block; width: auto; vertical-align: top;">
   </div>
+  <hr/>
+  <div class="form-row" style="margin-bottom:0;">
+    <label style="width: 100%;"><i class="fa fa-list"></i> <span> Span attribute mappings</span></label>
+  </div>
+  <div class="form-row node-input-otelAttributeMapping-container-row">
+    <ol id="node-input-otelAttributeMapping-container"></ol>
+  </div>
 </script>
 
 <script type="text/html" data-help-name="OpenTelemetry">
@@ -106,6 +216,12 @@ RED.nodes.registerType('OpenTelemetry', {
     <li>optional <code>root prefix</code> that will be added to the root Node-RED span name before the initial node name,</li>
     <li>optional comma-separated list of <code>ignored</code> nodes that will not emit a trace,</li>
     <li>optional comma-separated list of node types that will <code>propagate</code> traces using request headers (W3C trace context propagation).</li>
+  </ul></p>
+  <p>You can add your own attributes to the generated spans by adding:<ul>
+    <li>the <code>flow</code> identifier involved (you can leave this field empty to use in all flows),</li>
+    <li>the <code>nodeType</code> involved (examples: <code>http in</code>, <code>http request</code>, <code>file in</code>, ... , you can leave this field empty to use in all node types),</li>
+    <li>an <a href="https://opentelemetry.io/docs/concepts/signals/traces/#attributes" target="_blank" rel="noopener noreferrer">OTEL span attribute <code>key</code></a> (<code>node_red.action</code> for example)</li>
+    <li>the <code>path</code> in the processed message object in <a href="https://jmespath.org/" target="_blank" rel="noopener noreferrer">JMESPath syntax</a>, starting after <code>msg.</code> (<code>payload.action</code> for example)</li>
   </ul></p>
   <p>This node should only be added once for all your Node-Red flows (regardless of location).</p>
   <h3>References</h3>

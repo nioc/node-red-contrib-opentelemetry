@@ -22,8 +22,9 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
   - node type,
   - node name (if filled),
   - hostname,
-  - optionally `http status code` (for request node type),
-  - optionally `exception`.
+  - optional `http status code` (for request node type),
+  - optional `exception`,
+  - optional custom attributes based on message data.
 
 ![Example](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_01.png "Example")
 
@@ -78,7 +79,8 @@ As with every [node installation](https://nodered.org/docs/user-guide/runtime/ad
   - define an optional root span prefix (will be added in Node-RED root span name),
   - define nodes that should not send traces (using comma-separated list like `debug,catch`),
   - define nodes that should propagate [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview) (in http request headers, using comma-separated list like `http request,my-custom-node`),
-  - define time in seconds after which an unmodified message will be ended and deleted.
+  - define time in seconds after which an unmodified message will be ended and deleted,
+  - define custom attributes you want to send (optionally).
 
 ### Metrics
 
