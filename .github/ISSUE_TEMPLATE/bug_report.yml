@@ -1,0 +1,124 @@
+name: Bug report
+description: Something does not works
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is intended for reporting problems (crashes, malfunctions, etc.) that you encounter due to this library so that we can fix them.
+        Requests for changes must be made on the appropriate form.
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Bug scope
+      description: What type(s) of node(s) would be affected?
+      multiple: true
+      options:
+        - OTEL (traces)
+        - Prometheus (metrics)
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description:  |
+        A clear, concise description of the nature of the bug.
+        You can paste screenshot if relevant.
+      placeholder: "ex: When I use a specific node, relative spans does not contain information `xxx`"
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected behavior
+      description: A clear and concise description of what **you expected to happen**.
+      placeholder: "ex: Contacts list should display the nickname if present or Jid (name@domain.ltd)"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Steps to reproduce the problem.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '....'
+        3. Scroll down to '....'
+        4. See error
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log
+      description:  |
+        If applicable, please activate debug on config node and paste any relevant console logs.
+        This will be automatically formatted into code, so no need for backticks.
+        Pay attention to **remove/hide personal information** (server url, authentication, ...).
+      render: Text
+    validations:
+      required: false
+  - type: textarea
+    id: flow
+    attributes:
+      label: Flow
+      description:  |
+        Export a flow for reproducing.
+        This will be automatically formatted into code, so no need for backticks.
+        Pay attention to **remove/hide personal information** (server url, authentication, ...).
+      render: json
+      placeholder: |
+        [
+          {
+            "id": "1dc4c3fe2e38934c",
+            "type": "tab",
+            "label": "OpenTelemetry",
+            "disabled": false,
+            "info": "This is an example of a flow for the OpenTelemetry node.",
+            "env": []
+          },
+          {
+            "id": "ac125c4c6d10643e",
+            "type": "OpenTelemetry",
+            "z": "1dc4c3fe2e38934c",
+            "name": "",
+            "url": "http://localhost:4318/v1/traces",
+            "serviceName": "Node-RED",
+            "rootPrefix": "Message",
+            "timeout": "10",
+            "ignoredTypes": "debug,catch",
+            "propagateHeadersTypes": "",
+            "isLogging": false,
+            "x": 760,
+            "y": 160,
+            "wires": []
+          }
+        ]
+    validations:
+      required: false
+  - type: input
+    id: libVersion
+    attributes:
+      label: node-red-contrib-opentelemetry version
+      description:  |
+        What version of this library are you using?
+      placeholder: "ex: 1.5.1"
+    validations:
+      required: true
+  - type: input
+    id: nodeRedVersion
+    attributes:
+      label: Node-RED version
+      description:  |
+        What version of Node-RED are you running?
+      placeholder: "ex: 4.0.8 (docker)"
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: Other information
+      description: Other diagnostic information that may be useful for troubleshooting.
+    validations:
+      required: false

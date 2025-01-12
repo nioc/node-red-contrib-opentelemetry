@@ -1,0 +1,75 @@
+name: Feature request
+description: Suggest an idea for this library 
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this feature request report.
+        It’s up to you to make a solid case to convince us of the merits of this feature.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Intended behavior
+      description:  |
+        Describe the intended behavior in a clear and concise description of what the feature should enhance in the library.
+      placeholder: |
+        ex: I'm always frustrated when [...]
+        It should be more clear if [...]
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solution
+      description: |
+        Describe the solution you'd like in a clear and concise description of what you want to happen.
+      placeholder: |
+        ex: Span should contain [...]
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: "Describe in a clear and concise description of any alternative solutions or features you've considered."
+      placeholder: |
+        Another option is to request server for getting data [...]
+    validations:
+      required: false
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: From *your perspective*, what is the priority of this feature?
+      multiple: false
+      options:
+        - Could-have
+        - Should-have
+        - Must-have
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Feature scope
+      description: What type(s) of node(s) would be affected?
+      multiple: true
+      options:
+        - OTEL (traces)
+        - Prometheus (metrics)
+    validations:
+      required: true
+  - type: dropdown
+    id: pr
+    attributes:
+      label: Pull request
+      description: |
+        Do you plan to handle this feature by submitting a pull request?
+        Before writing code, please **wait that we confirm** this feature is relevant for the application.
+      multiple: false
+      options:
+        - "yes"
+        - "no"
+    validations:
+      required: true
