@@ -26,7 +26,9 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
   - optional `exception`,
   - optional custom attributes based on message data.
 
-![Example](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_01.png "Example")
+![Example spans in JaegerUI](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_01.png "Example spans")
+
+![Example spans to metrics in Grafana](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_02.png "Example spans to metrics")
 
 ### Metrics
 

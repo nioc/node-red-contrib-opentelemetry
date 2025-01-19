@@ -1,6 +1,6 @@
 {
   "name": "node-red-contrib-opentelemetry",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for Node-RED",
   "scripts": {
     "lint": "eslint . --fix"
@@ -11,7 +11,12 @@
   "keywords": [
     "node-red",
     "opentelemetry",
-    "tracing"
+    "tracing",
+    "profiling",
+    "instrumentation",
+    "stats",
+    "metrics",
+    "prometheus"
   ],
   "author": "nioc <dev@nioc.eu>",
   "license": "AGPL-3.0-or-later",
