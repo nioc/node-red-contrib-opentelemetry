@@ -31,8 +31,8 @@ RED.nodes.registerType('OpenTelemetry', {
       value: '',
     },
     url: {
-      value: 'http://localhost:4318/v1/traces',
-      required: true,
+      value: '',
+      required: false,
       validate: function (v) {
         try {
           // eslint-disable-next-line no-new
@@ -44,8 +44,8 @@ RED.nodes.registerType('OpenTelemetry', {
       },
     },
     serviceName: {
-      value: 'Node-RED',
-      required: true,
+      value: '',
+      required: false,
     },
     protocol: {
       value: 'http',
