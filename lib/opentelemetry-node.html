@@ -31,7 +31,7 @@ RED.nodes.registerType('OpenTelemetry', {
       value: '',
     },
     url: {
-      value: '',
+      value: 'http://localhost:4318/v1/traces',
       required: false,
       validate: function (v) {
         try {
@@ -44,7 +44,7 @@ RED.nodes.registerType('OpenTelemetry', {
       },
     },
     serviceName: {
-      value: '',
+      value: 'Node-RED',
       required: false,
     },
     protocol: {
