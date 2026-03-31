@@ -76,9 +76,9 @@ As with every [node installation](https://nodered.org/docs/user-guide/runtime/ad
 
 - Add OTEL node **once** (to any flow),
 - Setup the node:
-  - set OTEL [exporter](https://opentelemetry.io/docs/instrumentation/js/exporters/) url (example for Jaeger: `http://localhost:4318/v1/traces`),
+  - set OTEL [exporter](https://opentelemetry.io/docs/instrumentation/js/exporters/) url (example for Jaeger: `http://localhost:4318/v1/traces`). When left blank, the plugin will probe for [configuration via environment variables](https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/#otel_exporter_otlp_endpoint),
   - choose an OTLP transport protocol (`http/json` or `http/protobuf`),
-  - define a service name (will be displayed as span service),
+  - define a service name (will be displayed as span service; if the value of node is left blank, the plugin will probe for [configuration via environment variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/)),
   - define an optional root span prefix (will be added in Node-RED root span name),
   - define nodes that should not send traces (using comma-separated list like `debug,catch`),
   - define nodes that should propagate [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview) (in http request headers, using comma-separated list like `http request,my-custom-node`),
