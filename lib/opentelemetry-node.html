@@ -51,6 +51,10 @@ RED.nodes.registerType('OpenTelemetry', {
       value: 'http',
       required: true,
     },
+    authType: {
+      value: 'none',
+      required: true,
+    },
     rootPrefix: {
       value: 'Message ',
     },
@@ -63,6 +67,31 @@ RED.nodes.registerType('OpenTelemetry', {
     },
     propagateHeadersTypes: {
       value: '',
+    },
+    captureInput: {
+      value: '',
+    },
+    captureOutput: {
+      value: '',
+    },
+    maxValueLen: {
+      value: 256,
+      required: true,
+    },
+    maxObjectBytes: {
+      value: 2048,
+      required: true,
+    },
+    hashStrategy: {
+      value: 'sha256',
+      required: true,
+    },
+    heartbeatEnabled: {
+      value: false,
+    },
+    heartbeatInterval: {
+      value: 60,
+      required: true,
     },
     isLogging: {
       value: false,
@@ -90,10 +119,48 @@ RED.nodes.registerType('OpenTelemetry', {
       },
     },
   },
+  credentials: {
+    authValue: { type: 'password' },
+  },
   label: function () {
     return this.name || 'OpenTelemetry'
   },
   oneditprepare: function () {
+    function updateAuthFields (authType) {
+      const type = authType || 'none'
+      const row = $('#node-row-authValue')
+      const label = $('#node-label-authValue span')
+      const input = $('#node-input-authValue')
+      switch (type) {
+        case 'bearer':
+          row.show()
+          label.text('Token')
+          input.attr('placeholder', 'Bearer token')
+          break
+        case 'basic':
+          row.show()
+          label.text('Username:Password')
+          input.attr('placeholder', 'username:password')
+          break
+        case 'custom':
+          row.show()
+          label.text('Header value')
+          input.attr('placeholder', 'Authorization header value')
+          break
+        default:
+          row.hide()
+          input.attr('placeholder', '')
+          break
+      }
+    }
+
+    const currentAuthType = this.authType || 'none'
+    $('#node-input-authType').val(currentAuthType)
+    updateAuthFields(currentAuthType)
+    $('#node-input-authType').on('change', function () {
+      updateAuthFields(this.value)
+    })
+
     $('#node-input-otelAttributeMapping-container').css('min-height', '150px').css('min-width', '450px').editableList({
       addItem: function (container, i, opt) {
         if (!Object.prototype.hasOwnProperty.call(opt, 'attributeMapping')) {
@@ -152,6 +219,10 @@ RED.nodes.registerType('OpenTelemetry', {
       })
     })
     this.attributeMappings = attributeMappings.sort(sortAttributeMappings)
+    this.authType = $('#node-input-authType').val()
+    if (this.authType === 'none') {
+      $('#node-input-authValue').val('')
+    }
   },
 })
 </script>
@@ -173,6 +244,19 @@ RED.nodes.registerType('OpenTelemetry', {
       <option value="proto">http/protobuf</option>
     </select>
   </div>
+  <div class="form-row" title="Authorization method used when calling the exporter">
+    <label for="node-input-authType"><i class="fa fa-lock"></i> Auth</label>
+    <select id="node-input-authType">
+      <option value="none">None</option>
+      <option value="bearer">Bearer token</option>
+      <option value="basic">Basic auth</option>
+      <option value="custom">Custom</option>
+    </select>
+  </div>
+  <div class="form-row" id="node-row-authValue" style="display:none;" title="Value injected in the Authorization header">
+    <label id="node-label-authValue" for="node-input-authValue"><i class="fa fa-key"></i> <span>Value</span></label>
+    <input type="password" id="node-input-authValue" placeholder="">
+  </div>
   <div class="form-row" title="OpenTelemetry service name">
     <label for="node-input-serviceName"><i class="fa fa-server"></i> Service</label>
     <input type="text" id="node-input-serviceName" placeholder="Node-RED">
@@ -192,6 +276,36 @@ RED.nodes.registerType('OpenTelemetry', {
   <div class="form-row" title="Time in seconds after which an unmodified message will be ended and deleted">
     <label for="node-input-timeout"><i class="fa fa-hourglass"></i> Timeout</label>
     <input type="number" id="node-input-timeout" placeholder="10">
+  </div>
+  <div class="form-row" title="JMESPath selectors, one per line, captured on node input">
+    <label for="node-input-captureInput"><i class="fa fa-sign-in"></i> Capture in</label>
+    <textarea id="node-input-captureInput" rows="3" placeholder="payload.id&#10;payload.status"></textarea>
+  </div>
+  <div class="form-row" title="JMESPath selectors, one per line, captured on node output">
+    <label for="node-input-captureOutput"><i class="fa fa-sign-out"></i> Capture out</label>
+    <textarea id="node-input-captureOutput" rows="3" placeholder="payload.id&#10;payload.result"></textarea>
+  </div>
+  <div class="form-row" title="Maximum string length before truncation">
+    <label for="node-input-maxValueLen"><i class="fa fa-text-width"></i> Max value len</label>
+    <input type="number" id="node-input-maxValueLen" placeholder="256">
+  </div>
+  <div class="form-row" title="Maximum serialized object size (bytes) before hashing">
+    <label for="node-input-maxObjectBytes"><i class="fa fa-database"></i> Max object bytes</label>
+    <input type="number" id="node-input-maxObjectBytes" placeholder="2048">
+  </div>
+  <div class="form-row" title="Hash strategy for oversized captured objects">
+    <label for="node-input-hashStrategy"><i class="fa fa-hashtag"></i> Hash strategy</label>
+    <select id="node-input-hashStrategy">
+      <option value="sha256">sha256(JSON.stringify(value))</option>
+    </select>
+  </div>
+  <div class="form-row" title="Emit periodic heartbeat spans even when no flow message is running">
+    <label for="node-input-heartbeatEnabled"><i class="fa fa-heartbeat"></i> Heartbeat</label>
+    <input type="checkbox" id="node-input-heartbeatEnabled" style="display: inline-block; width: auto; vertical-align: top;">
+  </div>
+  <div class="form-row" title="Heartbeat interval in seconds">
+    <label for="node-input-heartbeatInterval"><i class="fa fa-clock-o"></i> Heartbeat sec</label>
+    <input type="number" id="node-input-heartbeatInterval" placeholder="60">
   </div>
   <div class="form-row" title="Send debug logs to the console">
     <label for="node-input-isLogging"><i class="fa fa-bug"></i> Debug log</label>
@@ -213,9 +327,12 @@ RED.nodes.registerType('OpenTelemetry', {
   <p>You must set:<ul>
     <li>the <code>url</code> of the exporter,</li>
     <li>the <code>service</code> name displayed in your visualization tool,</li>
+    <li>optional <code>authorization</code> method and credential when the collector requires it,</li>
     <li>optional <code>root prefix</code> that will be added to the root Node-RED span name before the initial node name,</li>
     <li>optional comma-separated list of <code>ignored</code> nodes that will not emit a trace,</li>
-    <li>optional comma-separated list of node types that will <code>propagate</code> traces using request headers (W3C trace context propagation).</li>
+    <li>optional comma-separated list of node types that will <code>propagate</code> traces using request headers (W3C trace context propagation),</li>
+    <li>optional input/output capture selectors (JMESPath, one per line), with truncation/hash controls,</li>
+    <li>optional lifecycle heartbeat interval.</li>
   </ul></p>
   <p>You can add your own attributes to the generated spans by adding:<ul>
     <li>the <code>flow</code> identifier involved (you can leave this field empty to use in all flows),</li>

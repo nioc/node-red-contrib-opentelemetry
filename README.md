@@ -15,16 +15,29 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
 - based on [OpenTelemetry JavaScript framework](https://github.com/open-telemetry/opentelemetry-js) and [Node-RED messaging hooks](https://nodered.org/docs/api/hooks/messaging):
   - create spans on `onSend(source)` and `postDeliver(destination)` events,
   - end spans on `onComplete` and `postDeliver(source)` events.
+- message lifecycle events are added on spans:
+  - `msg.sent`,
+  - `msg.received`,
+  - `msg.completed`,
+  - `msg.error`,
+  - `msg.timeout`.
 - trace includes:
   - message id,
   - flow id,
   - node id,
   - node type,
   - node name (if filled),
+  - run id (`nodered.run.id`) shared across all hops of one automation execution,
+  - lightweight input/output fingerprint (`nodered.msg.topic`, `nodered.payload.type`, `nodered.payload.size`, `nodered.msg.keys`),
   - hostname,
   - optional `http status code` (for request node type),
   - optional `exception`,
+  - optional selected input/output fields (JMESPath selectors, with truncation/hash limits),
   - optional custom attributes based on message data.
+
+- OTEL node lifecycle telemetry:
+  - `nodered.lifecycle` spans (`start`, `deploy`, `stop`),
+  - optional `nodered.heartbeat` spans with uptime.
 
 ![Example spans in JaegerUI](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_01.png "Example spans")
 
@@ -83,6 +96,9 @@ As with every [node installation](https://nodered.org/docs/user-guide/runtime/ad
   - define nodes that should not send traces (using comma-separated list like `debug,catch`),
   - define nodes that should propagate [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview) (in http request headers, using comma-separated list like `http request,my-custom-node`),
   - define time in seconds after which an unmodified message will be ended and deleted,
+  - optionally define input/output selectors to capture (`capture.input` and `capture.output`, JMESPath one per line),
+  - define `maxValueLen`, `maxObjectBytes`, and `hashStrategy` (currently `sha256(JSON.stringify(value))`) for safe value capture,
+  - optionally enable heartbeat and define heartbeat interval (seconds),
   - define custom attributes you want to send (optionally).
 
 ### Metrics
