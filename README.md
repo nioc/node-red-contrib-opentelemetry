@@ -1,14 +1,14 @@
 # Node-RED OpenTelemetry
 
 [![license: LGPLv3](https://img.shields.io/badge/license-LGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
-[![GitHub release](https://img.shields.io/github/release/nioc/node-red-contrib-opentelemetry.svg)](https://github.com/nioc/node-red-contrib-opentelemetry/releases/latest)
-[![GitHub Lint Workflow Status](https://img.shields.io/github/actions/workflow/status/nioc/node-red-contrib-opentelemetry/commit.yml?label=lint)](https://github.com/nioc/node-red-contrib-opentelemetry/actions/workflows/commit.yml)
-[![GitHub Publish Workflow Status](https://img.shields.io/github/actions/workflow/status/nioc/node-red-contrib-opentelemetry/publish.yml?label=publish)](https://github.com/nioc/node-red-contrib-opentelemetry/actions/workflows/publish.yml)
-[![npm](https://img.shields.io/npm/dt/node-red-contrib-opentelemetry)](https://www.npmjs.com/package/node-red-contrib-opentelemetry)
+[![GitHub release](https://img.shields.io/github/release/frankvdb7/node-red-contrib-opentelemetry.svg)](https://github.com/frankvdb7/node-red-contrib-opentelemetry/releases/latest)
+[![GitHub Lint Workflow Status](https://img.shields.io/github/actions/workflow/status/frankvdb7/node-red-contrib-opentelemetry/nodejs.yml?label=lint)](https://github.com/frankvdb7/node-red-contrib-opentelemetry/actions/workflows/nodejs.yml)
+[![GitHub Publish Workflow Status](https://img.shields.io/github/actions/workflow/status/frankvdb7/node-red-contrib-opentelemetry/publish-npmjs.yml?label=publish)](https://github.com/frankvdb7/node-red-contrib-opentelemetry/actions/workflows/publish-npmjs.yml)
+[![npm](https://img.shields.io/npm/dt/@frankvdb/node-red-contrib-opentelemetry)](https://www.npmjs.com/package/@frankvdb/node-red-contrib-opentelemetry)
 
 Full OpenTelemetry support (tracing, metrics, logs) for Node-RED.
 
-## Key features
+## Key Features
 
 ### Traces
 
@@ -42,10 +42,10 @@ Full OpenTelemetry support (tracing, metrics, logs) for Node-RED.
 Search for `@frankvdb/node-red-contrib-opentelemetry` in the Node-RED Palette Manager or install via npm:
 
 ``` bash
-npm install node-red-contrib-opentelemetry
+npm install @frankvdb/node-red-contrib-opentelemetry
 ```
 
-As with every [node installation](https://nodered.org/docs/user-guide/runtime/adding-nodes), you will need to restart Node-RED for it to pick-up the new nodes.
+Restart Node-RED after installation to pick up the new nodes.
 
 ## Usage
 
@@ -74,7 +74,7 @@ You can also use standard OpenTelemetry environment variables:
 - `OTEL_EXPORTER_OTLP_PROTOCOL`
 - `OTEL_SERVICE_NAME`
 
-Environment values are used when the node keeps its default values for URL/protocol/service name. Explicit node settings still win.
+Environment variables are used only if the corresponding node fields are left at their default values.
 
 ## Examples
 
@@ -85,9 +85,7 @@ You can import these into Node-RED using **Import** from the main menu (Ctrl-I).
 
 ## Versioning
 
-node-red-contrib-opentelemetry is maintained under the [semantic versioning](https://semver.org/) guidelines.
-
-See the [releases](https://github.com/nioc/node-red-contrib-opentelemetry/releases) on this repository for changelog.
+This project follows [Semantic Versioning](https://semver.org/). See the [releases](https://github.com/frankvdb7/node-red-contrib-opentelemetry/releases) for the changelog.
 
 ## Contributors
 
@@ -99,8 +97,4 @@ See the [releases](https://github.com/nioc/node-red-contrib-opentelemetry/releas
 
 ## License
 
-This project is licensed under the GNU Lesser General Public License v3.0 - see the [LICENSE](LICENSE.md) file for details
-
-# Node-RED OpenTelemetry and Prometheus Module
-
-This is a Node-RED module for instrumenting flows with OpenTelemetry and exposing metrics in the Prometheus format.
+This project is licensed under the **GNU Lesser General Public License v3.0**. See the [LICENSE](LICENSE.md) file for details.
