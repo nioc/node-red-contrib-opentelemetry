@@ -80,8 +80,8 @@ RED.nodes.registerType('OpenTelemetry', {
     propagateHeadersTypes: {
       value: '',
     },
-    isLogging: {
-      value: false,
+    logLevel: {
+      value: 'warn',
     },
     attributeMappings: {
       value: [],
@@ -112,7 +112,8 @@ RED.nodes.registerType('OpenTelemetry', {
   oneditprepare: function () {
     $('#node-input-otelAttributeMapping-container').css('min-height', '150px').css('min-width', '450px').editableList({
       addItem: (container, _i, opt) => {
-        if (!Object.hasOwn(opt, 'attributeMapping')) {
+        // biome-ignore lint/suspicious/noPrototypeBuiltins: use browser-compatible hasOwn check for older Node-RED editor runtimes
+        if (!Object.prototype.hasOwnProperty.call(opt, 'attributeMapping')) {
           opt.attributeMapping = {
             isAfter: false,
             flow: '',
@@ -227,9 +228,15 @@ RED.nodes.registerType('OpenTelemetry', {
     <label for="node-input-timeout"><i class="fa fa-hourglass"></i> Timeout</label>
     <input type="number" id="node-input-timeout" placeholder="10">
   </div>
-  <div class="form-row" title="Send debug logs to the console">
-    <label for="node-input-isLogging"><i class="fa fa-bug"></i> Debug log</label>
-    <input type="checkbox" id="node-input-isLogging" style="display: inline-block; width: auto; vertical-align: top;">
+  <div class="form-row" title="Node-RED console log level">
+    <label for="node-input-logLevel"><i class="fa fa-bug"></i> Log level</label>
+    <select id="node-input-logLevel">
+      <option value="off">off</option>
+      <option value="error">error</option>
+      <option value="warn">warn</option>
+      <option value="info">info</option>
+      <option value="debug">debug</option>
+    </select>
   </div>
   <hr/>
   <div class="form-row" style="margin-bottom:0;">

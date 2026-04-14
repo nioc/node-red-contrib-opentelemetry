@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const otelApi = require("@opentelemetry/api");
+const otelLogsApi = require("@opentelemetry/api-logs");
 const otelModule = require("../dist/opentelemetry-node");
 
 const mockRed = {
@@ -21,8 +23,9 @@ const {
 	getMsgSpans,
 	resetState,
 	logEvent,
-	setLogging,
+	setLogLevel,
 	resolveOpenTelemetryConfig,
+	getSharedState,
 } = otelModule.__test__;
 
 const originalEnv = { ...process.env };
@@ -179,6 +182,8 @@ test("resolveOpenTelemetryConfig reads OTEL env values when node uses defaults",
 		serviceName: "Node-RED",
 	});
 	assert.equal(config.url, "http://collector:4318/v1/traces");
+	assert.equal(config.metricsUrl, "http://collector:4318/v1/metrics");
+	assert.equal(config.logsUrl, "http://collector:4318/v1/logs");
 	assert.equal(config.protocol, "proto");
 	assert.equal(config.serviceName, "env-service");
 });
@@ -207,6 +212,92 @@ test("resolveOpenTelemetryConfig supports trace-specific env overrides", () => {
 	const config = resolveOpenTelemetryConfig({});
 	assert.equal(config.url, "http://trace-specific:4318/custom");
 	assert.equal(config.protocol, "proto");
+});
+
+test("resolveOpenTelemetryConfig appends signal paths to generic endpoint base path", () => {
+	process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://collector:4318/otlp";
+	const config = resolveOpenTelemetryConfig({});
+	assert.equal(config.url, "http://collector:4318/otlp/v1/traces");
+	assert.equal(config.metricsUrl, "http://collector:4318/otlp/v1/metrics");
+	assert.equal(config.logsUrl, "http://collector:4318/otlp/v1/logs");
+});
+
+test("resolveOpenTelemetryConfig supports per-signal protocol env overrides", () => {
+	process.env.OTEL_EXPORTER_OTLP_PROTOCOL = "http/json";
+	process.env.OTEL_EXPORTER_OTLP_TRACES_PROTOCOL = "http/protobuf";
+	process.env.OTEL_EXPORTER_OTLP_METRICS_PROTOCOL = "http/json";
+	process.env.OTEL_EXPORTER_OTLP_LOGS_PROTOCOL = "http/protobuf";
+	const config = resolveOpenTelemetryConfig({ protocol: "http" });
+	assert.equal(config.tracesProtocol, "proto");
+	assert.equal(config.metricsProtocol, "http");
+	assert.equal(config.logsProtocol, "proto");
+	assert.equal(config.protocol, "proto");
+});
+
+test("resolveOpenTelemetryConfig reads log level from env variable", () => {
+	process.env.NODE_RED_OTEL_LOG_LEVEL = "debug";
+	const config = resolveOpenTelemetryConfig({});
+	assert.equal(config.logLevel, "debug");
+});
+
+test("resolveOpenTelemetryConfig uses explicit config log level over env", () => {
+	process.env.NODE_RED_OTEL_LOG_LEVEL = "error";
+	const config = resolveOpenTelemetryConfig({ logLevel: "info" });
+	assert.equal(config.logLevel, "info");
+});
+
+test("resolveOpenTelemetryConfig appends signal paths for specific endpoints without path", () => {
+	process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "http://trace:4318";
+	process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = "http://metrics:4318";
+	process.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "http://logs:4318";
+	const config = resolveOpenTelemetryConfig({});
+	assert.equal(config.url, "http://trace:4318/v1/traces");
+	assert.equal(config.metricsUrl, "http://metrics:4318/v1/metrics");
+	assert.equal(config.logsUrl, "http://logs:4318/v1/logs");
+});
+
+test("resolveOpenTelemetryConfig preserves existing endpoint paths", () => {
+	process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://collector:4318/otlp";
+	process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT =
+		"http://trace-specific:4318/custom-traces";
+	process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT =
+		"http://metrics-specific:4318/custom-metrics";
+	process.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT =
+		"http://logs-specific:4318/custom-logs";
+	const config = resolveOpenTelemetryConfig({});
+	assert.equal(config.url, "http://trace-specific:4318/custom-traces");
+	assert.equal(config.metricsUrl, "http://metrics-specific:4318/custom-metrics");
+	assert.equal(config.logsUrl, "http://logs-specific:4318/custom-logs");
+});
+
+test("resolveOpenTelemetryConfig keeps malformed env endpoint without throwing", () => {
+	process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://[::1";
+	const config = resolveOpenTelemetryConfig({});
+	assert.equal(config.url, "http://[::1");
+	assert.equal(config.metricsUrl, "http://[::1");
+	assert.equal(config.logsUrl, "http://[::1");
+});
+
+test("resolveOpenTelemetryConfig appends signal paths for explicit base node URLs", () => {
+	const config = resolveOpenTelemetryConfig({
+		url: "http://trace-explicit:4318",
+		metricsUrl: "http://metrics-explicit:4318",
+		logsUrl: "http://logs-explicit:4318",
+	});
+	assert.equal(config.url, "http://trace-explicit:4318/v1/traces");
+	assert.equal(config.metricsUrl, "http://metrics-explicit:4318/v1/metrics");
+	assert.equal(config.logsUrl, "http://logs-explicit:4318/v1/logs");
+});
+
+test("resolveOpenTelemetryConfig keeps explicit custom paths for node URLs", () => {
+	const config = resolveOpenTelemetryConfig({
+		url: "http://trace-explicit:4318/custom-traces",
+		metricsUrl: "http://metrics-explicit:4318/custom-metrics",
+		logsUrl: "http://logs-explicit:4318/custom-logs",
+	});
+	assert.equal(config.url, "http://trace-explicit:4318/custom-traces");
+	assert.equal(config.metricsUrl, "http://metrics-explicit:4318/custom-metrics");
+	assert.equal(config.logsUrl, "http://logs-explicit:4318/custom-logs");
 });
 
 test("createSpan creates parent and child spans for new messages", () => {
@@ -294,9 +385,23 @@ test("deleteOutdatedMsgSpans removes outdated entries", () => {
 });
 
 test("logEvent should not log when logging is disabled", () => {
-	setLogging(false);
+	setLogLevel("off");
 	const consoleLogSpy = test.mock.method(console, "log");
 	logEvent(mockRed, {}, "test", {});
+	assert.equal(consoleLogSpy.mock.calls.length, 0);
+});
+
+test("logEvent respects debug log level", () => {
+	setLogLevel("debug");
+	const consoleLogSpy = test.mock.method(console, "log");
+	logEvent(mockRed, {}, "test", { msg: { _msgid: "1" } });
+	assert.equal(consoleLogSpy.mock.calls.length, 1);
+});
+
+test("logEvent does not write debug output when level is warn", () => {
+	setLogLevel("warn");
+	const consoleLogSpy = test.mock.method(console, "log");
+	logEvent(mockRed, {}, "test", { msg: { _msgid: "1" } });
 	assert.equal(consoleLogSpy.mock.calls.length, 0);
 });
 
@@ -375,6 +480,36 @@ test("endSpan should handle http request and response correctly", () => {
 	assert.deepEqual(childSpan.attributes["http.response.status_code"], 200);
 });
 
+test("endSpan auto-applies client HTTP response attributes for unknown node", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const msg = {
+		_msgid: "unknown-http-client",
+		statusCode: 202,
+		responseUrl: "http://example.com/queue/result",
+	};
+	const node = {
+		id: "queue-client-node",
+		type: "custom queue request",
+		name: "Queue Request",
+		z: "flow",
+	};
+	const childSpan = createSpan(
+		mockRed,
+		tracer,
+		{ _msgid: "unknown-http-client" },
+		node,
+		{},
+		false,
+	);
+	endSpan(mockRed, msg, null, node);
+	assert.equal(childSpan.ended, true);
+	assert.equal(childSpan.attributes["http.response.status_code"], 202);
+	assert.equal(childSpan.attributes["url.path"], "/queue/result");
+	assert.equal(childSpan.attributes["server.address"], "example.com");
+});
+
 test("endSpan should handle errors correctly", () => {
 	const tracer = {
 		startSpan: (name, options) => createFakeSpan(name, options),
@@ -385,6 +520,24 @@ test("endSpan should handle errors correctly", () => {
 	const recordExceptionSpy = test.mock.method(childSpan, "recordException");
 	endSpan(mockRed, msg, "error", node);
 	assert.equal(recordExceptionSpy.mock.calls.length, 1);
+});
+
+test("endSpan should stringify non-Error exception objects", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const msg = { _msgid: "obj-error", error: { reason: "bad payload" } };
+	const node = {
+		id: "obj-node",
+		type: "function",
+		name: "Function",
+		z: "flow",
+	};
+	const childSpan = createSpan(mockRed, tracer, msg, node, {}, false);
+	const recordExceptionSpy = test.mock.method(childSpan, "recordException");
+	endSpan(mockRed, msg, { code: 500 }, node);
+	assert.equal(recordExceptionSpy.mock.calls.length, 1);
+	assert.equal(typeof recordExceptionSpy.mock.calls[0].arguments[0], "string");
 });
 
 test("createSpan should handle websocket nodes correctly", () => {
@@ -418,6 +571,137 @@ test("createSpan should handle websocket nodes correctly", () => {
 	assert.deepEqual(wsOutSpan.attributes["server.address"], "localhost");
 	assert.deepEqual(wsOutSpan.attributes["server.port"], "1880");
 	assert.deepEqual(wsOutSpan.attributes["url.scheme"], "ws");
+
+});
+
+test("createSpan websocket out should support relative serverConfig path", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const wsOutRelativeMsg = { _msgid: "ws-out-relative" };
+	const wsOutRelativeNode = {
+		id: "ws-out-relative-node",
+		type: "websocket out",
+		name: "WS Out Relative",
+		z: "flow",
+		serverConfig: { path: "/ws/events" },
+	};
+	const wsOutRelativeSpan = createSpan(
+		mockRed,
+		tracer,
+		wsOutRelativeMsg,
+		wsOutRelativeNode,
+		{},
+		false,
+	);
+	assert.ok(wsOutRelativeSpan);
+	assert.deepEqual(wsOutRelativeSpan.attributes["url.path"], "/ws/events");
+	assert.equal(wsOutRelativeSpan.attributes["server.address"], undefined);
+	assert.equal(wsOutRelativeSpan.attributes["server.port"], undefined);
+	assert.equal(wsOutRelativeSpan.attributes["url.scheme"], undefined);
+});
+
+test("createSpan websocket out should keep malformed endpoint as url.path", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const msg = { _msgid: "ws-out-malformed" };
+	const node = {
+		id: "ws-out-malformed-node",
+		type: "websocket out",
+		name: "WS Out Malformed",
+		z: "flow",
+		serverConfig: { path: "http://[::1" },
+	};
+	const span = createSpan(mockRed, tracer, msg, node, {}, false);
+	assert.ok(span);
+	assert.equal(span.attributes["url.path"], "http://[::1");
+	assert.equal(span.attributes["server.address"], undefined);
+	assert.equal(span.attributes["server.port"], undefined);
+	assert.equal(span.attributes["url.scheme"], undefined);
+});
+
+test("endSpan should ignore malformed responseUrl without throwing", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const node = {
+		id: "http-request-malformed-url",
+		type: "http request",
+		name: "HTTP Request",
+		z: "flow",
+	};
+	const childSpan = createSpan(
+		mockRed,
+		tracer,
+		{ _msgid: "malformed-response-url" },
+		node,
+		{},
+		false,
+	);
+	assert.doesNotThrow(() => {
+		endSpan(
+			mockRed,
+			{
+				_msgid: "malformed-response-url",
+				statusCode: 200,
+				responseUrl: "http://[::1",
+			},
+			null,
+			node,
+		);
+	});
+	assert.equal(childSpan.ended, true);
+});
+
+test("createSpan auto-enriches unknown node with HTTP-like message context", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const msg = {
+		_msgid: "unknown-http-like",
+		req: {
+			method: "post",
+			path: "/queue/consume",
+			ip: "10.0.0.8",
+			headers: {
+				"user-agent": "test-agent",
+			},
+		},
+		topic: "orders",
+		queue: "orders-queue",
+	};
+	const node = {
+		id: "queue-node",
+		type: "custom queue in",
+		name: "Queue In",
+		z: "flow",
+	};
+	const span = createSpan(mockRed, tracer, msg, node, {}, false);
+	assert.ok(span);
+	assert.equal(msg.otelStartTime !== undefined, true);
+	assert.equal(span.attributes["http.request.method"], "POST");
+	assert.equal(span.attributes["url.path"], "/queue/consume");
+	assert.equal(span.attributes["client.address"], "10.0.0.8");
+	assert.equal(span.attributes["node_red.msg.topic"], "orders");
+	assert.equal(span.attributes["node_red.msg.queue"], "orders-queue");
+});
+
+test("createSpan auto-enriches unknown node endpoint path from node config", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const msg = { _msgid: "unknown-endpoint" };
+	const node = {
+		id: "custom-endpoint-node",
+		type: "custom endpoint",
+		name: "Custom Endpoint",
+		z: "flow",
+		serverConfig: { path: "/mq/events" },
+	};
+	const span = createSpan(mockRed, tracer, msg, node, {}, false);
+	assert.ok(span);
+	assert.equal(span.attributes["url.path"], "/mq/events");
 });
 
 test("endSpan should set span status to ERROR on error", () => {
@@ -434,6 +718,293 @@ test("endSpan should set span status to ERROR on error", () => {
 	assert.equal(setStatusSpy.mock.calls.length, 1);
 	assert.deepEqual(setStatusSpy.mock.calls[0].arguments[0].code, 2); // 2 = ERROR
 	assert.equal(parentSetStatusSpy.mock.calls.length, 1);
+});
+
+test("endSpan records http metrics even when there is no active span", () => {
+	const sharedState = getSharedState();
+	const recordSpy = test.mock.fn();
+	sharedState.metrics.requestDuration = { record: recordSpy };
+	const startTime = Date.now() - 50;
+	endSpan(
+		mockRed,
+		{
+			_msgid: "metrics-only-msg",
+			otelStartTime: startTime,
+			req: { method: "GET", path: "/health" },
+			res: { _res: { statusCode: 204 } },
+		},
+		null,
+		{ id: "http-response", type: "http response", z: "flow" },
+	);
+	assert.equal(recordSpy.mock.calls.length, 1);
+	const call = recordSpy.mock.calls[0];
+	assert.equal(typeof call.arguments[0], "number");
+	assert.ok(call.arguments[0] >= 0);
+	assert.deepEqual(call.arguments[1], {
+		"http.response.status_code": 204,
+		"http.request.method": "GET",
+		"url.path": "/health",
+	});
+});
+
+test("endSpan records http metrics only once per message", () => {
+	const sharedState = getSharedState();
+	const recordSpy = test.mock.fn();
+	sharedState.metrics.requestDuration = { record: recordSpy };
+	const msg = {
+		_msgid: "metrics-once-msg",
+		otelStartTime: Date.now() - 25,
+		req: { method: "GET", path: "/once" },
+		res: { _res: { statusCode: 200 } },
+	};
+	const node = { id: "resp-node", type: "http response", z: "flow" };
+
+	endSpan(mockRed, msg, null, node);
+	endSpan(mockRed, msg, null, node);
+
+	assert.equal(recordSpy.mock.calls.length, 1);
+	assert.equal(msg.otelHttpMetricsRecorded, true);
+});
+
+test("endSpan records http metrics once across cloned messages with same _msgid", () => {
+	const sharedState = getSharedState();
+	const recordSpy = test.mock.fn();
+	sharedState.metrics.requestDuration = { record: recordSpy };
+	const node = { id: "resp-node", type: "http response", z: "flow" };
+
+	const msgCloneA = {
+		_msgid: "metrics-clone-msg",
+		otelStartTime: Date.now() - 25,
+		req: { method: "GET", path: "/clone" },
+		res: { _res: { statusCode: 200 } },
+	};
+	const msgCloneB = {
+		_msgid: "metrics-clone-msg",
+		otelStartTime: Date.now() - 25,
+		req: { method: "GET", path: "/clone" },
+		res: { _res: { statusCode: 200 } },
+	};
+
+	endSpan(mockRed, msgCloneA, null, node);
+	endSpan(mockRed, msgCloneB, null, node);
+
+	assert.equal(recordSpy.mock.calls.length, 1);
+});
+
+test("endSpan records terminal HTTP metrics for custom responder when response is finished", () => {
+	const sharedState = getSharedState();
+	const recordSpy = test.mock.fn();
+	sharedState.metrics.requestDuration = { record: recordSpy };
+	const node = { id: "custom-responder", type: "custom responder", z: "flow" };
+	const msg = {
+		_msgid: "metrics-custom-terminal",
+		otelStartTime: Date.now() - 40,
+		req: { method: "GET", path: "/custom" },
+		res: { _res: { statusCode: 204, finished: true } },
+	};
+
+	endSpan(mockRed, msg, null, node);
+
+	assert.equal(recordSpy.mock.calls.length, 1);
+	assert.equal(msg.otelHttpMetricsRecorded, true);
+});
+
+test("endSpan records metrics for different messages independently", () => {
+	const sharedState = getSharedState();
+	const recordSpy = test.mock.fn();
+	sharedState.metrics.requestDuration = { record: recordSpy };
+	const node = { id: "resp-node", type: "http response", z: "flow" };
+
+	const msgA = {
+		_msgid: "metrics-a",
+		otelStartTime: Date.now() - 20,
+		req: { method: "GET", path: "/a" },
+		res: { _res: { statusCode: 200 } },
+	};
+	const msgB = {
+		_msgid: "metrics-b",
+		otelStartTime: Date.now() - 30,
+		req: { method: "POST", path: "/b" },
+		res: { _res: { statusCode: 201 } },
+	};
+
+	endSpan(mockRed, msgA, null, node);
+	endSpan(mockRed, msgB, null, node);
+
+	assert.equal(recordSpy.mock.calls.length, 2);
+	assert.equal(msgA.otelHttpMetricsRecorded, true);
+	assert.equal(msgB.otelHttpMetricsRecorded, true);
+});
+
+test("endSpan skips metrics when otelStartTime is missing", () => {
+	const sharedState = getSharedState();
+	const recordSpy = test.mock.fn();
+	sharedState.metrics.requestDuration = { record: recordSpy };
+	const msg = {
+		_msgid: "metrics-no-start",
+		req: { method: "GET", path: "/missing" },
+		res: { _res: { statusCode: 200 } },
+	};
+	const node = { id: "resp-node", type: "http response", z: "flow" };
+
+	endSpan(mockRed, msg, null, node);
+
+	assert.equal(recordSpy.mock.calls.length, 0);
+	assert.equal(msg.otelHttpMetricsRecorded, undefined);
+});
+
+test("endSpan does not apply server response status for non-terminal custom nodes", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const msg = {
+		_msgid: "unknown-http-response",
+		req: { method: "GET", path: "/orders" },
+		res: { _res: { statusCode: 200 } },
+	};
+	const rootNode = {
+		id: "root-node",
+		type: "custom ingress",
+		name: "Ingress",
+		z: "flow",
+		method: "GET",
+	};
+	const endNode = {
+		id: "resp-node",
+		type: "custom responder",
+		name: "Responder",
+		z: "flow",
+	};
+	createSpan(mockRed, tracer, msg, rootNode, {}, false);
+	const endSpanRef = createSpan(mockRed, tracer, msg, endNode, {}, false);
+	const parent = getMsgSpans().get("unknown-http-response");
+	const rootSpanId = "unknown-http-response#root-node";
+	const rootSpan = parent.spans.get(rootSpanId);
+	assert.ok(rootSpan);
+	assert.ok(endSpanRef);
+	const parentStatusSpy = test.mock.method(parent.parentSpan, "setStatus");
+
+	endSpan(mockRed, msg, null, endNode);
+	assert.equal(endSpanRef.ended, true);
+	assert.equal(parentStatusSpy.mock.calls.length, 0);
+	assert.equal(parent.parentSpan.attributes["http.response.status_code"], undefined);
+});
+
+test("endSpan applies response status to root span for terminal http response node", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const msg = {
+		_msgid: "unknown-http-response-error",
+		req: { method: "GET", path: "/orders" },
+		res: { _res: { statusCode: 500 } },
+	};
+	const rootNode = {
+		id: "root-node-error",
+		type: "custom ingress",
+		name: "Ingress",
+		z: "flow",
+		method: "GET",
+	};
+	const endNode = {
+		id: "resp-node-error",
+		type: "http response",
+		name: "HTTP Response",
+		z: "flow",
+	};
+	createSpan(mockRed, tracer, msg, rootNode, {}, false);
+	const endSpanRef = createSpan(mockRed, tracer, msg, endNode, {}, false);
+	const parent = getMsgSpans().get("unknown-http-response-error");
+	assert.ok(parent);
+	assert.ok(endSpanRef);
+	const parentStatusSpy = test.mock.method(parent.parentSpan, "setStatus");
+
+	endSpan(mockRed, msg, null, endNode);
+
+	assert.equal(endSpanRef.ended, true);
+	assert.equal(parentStatusSpy.mock.calls.length, 1);
+	assert.equal(parentStatusSpy.mock.calls[0].arguments[0].code, 2); // ERROR
+	assert.equal(parent.parentSpan.attributes["http.response.status_code"], 500);
+});
+
+test("endSpan applies response status to root span for custom terminal responder", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const msg = {
+		_msgid: "unknown-http-response-custom-terminal",
+		req: { method: "GET", path: "/orders" },
+		res: { _res: { statusCode: 201, finished: true } },
+	};
+	const rootNode = {
+		id: "root-node-custom-terminal",
+		type: "custom ingress",
+		name: "Ingress",
+		z: "flow",
+		method: "GET",
+	};
+	const endNode = {
+		id: "resp-node-custom-terminal",
+		type: "custom responder",
+		name: "Responder",
+		z: "flow",
+	};
+	createSpan(mockRed, tracer, msg, rootNode, {}, false);
+	const endSpanRef = createSpan(mockRed, tracer, msg, endNode, {}, false);
+	const parent = getMsgSpans().get("unknown-http-response-custom-terminal");
+	assert.ok(parent);
+	assert.ok(endSpanRef);
+	const parentStatusSpy = test.mock.method(parent.parentSpan, "setStatus");
+
+	endSpan(mockRed, msg, null, endNode);
+
+	assert.equal(endSpanRef.ended, true);
+	assert.equal(parentStatusSpy.mock.calls.length, 1);
+	assert.equal(parent.parentSpan.attributes["http.response.status_code"], 201);
+});
+
+test("endSpan keeps error status when terminal response has 2xx status", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const msg = {
+		_msgid: "error-with-2xx-response",
+		req: { method: "POST", path: "/orders" },
+		res: { _res: { statusCode: 201 } },
+	};
+	const rootNode = {
+		id: "root-node-error-2xx",
+		type: "custom ingress",
+		name: "Ingress",
+		z: "flow",
+		method: "POST",
+	};
+	const endNode = {
+		id: "resp-node-error-2xx",
+		type: "http response",
+		name: "HTTP Response",
+		z: "flow",
+	};
+	createSpan(mockRed, tracer, msg, rootNode, {}, false);
+	const endSpanRef = createSpan(mockRed, tracer, msg, endNode, {}, false);
+	const parent = getMsgSpans().get("error-with-2xx-response");
+	assert.ok(parent);
+	assert.ok(endSpanRef);
+	const childSetStatusSpy = test.mock.method(endSpanRef, "setStatus");
+	const parentSetStatusSpy = test.mock.method(parent.parentSpan, "setStatus");
+
+	endSpan(mockRed, msg, new Error("request failed"), endNode);
+
+	const childStatusCodes = childSetStatusSpy.mock.calls
+		.map((call) => call.arguments[0]?.code)
+		.filter((code) => typeof code === "number");
+	const parentStatusCodes = parentSetStatusSpy.mock.calls
+		.map((call) => call.arguments[0]?.code)
+		.filter((code) => typeof code === "number");
+	assert.ok(childStatusCodes.includes(2));
+	assert.ok(parentStatusCodes.includes(2));
+	assert.equal(childStatusCodes.includes(1), false);
+	assert.equal(parentStatusCodes.includes(1), false);
 });
 
 test("postDeliver.otel hook injects trace context for http and mqtt", async (_t) => {
@@ -479,7 +1050,7 @@ test("postDeliver.otel hook injects trace context for http and mqtt", async (_t)
 		rootPrefix: "",
 		ignoredTypes: "",
 		propagateHeadersTypes: "http request,mqtt out",
-		isLogging: false,
+		logLevel: "off",
 		timeout: 10,
 		attributeMappings: [],
 	};
@@ -568,7 +1139,7 @@ test("preDeliver.otel hook clears all propagated trace headers safely", () => {
 		rootPrefix: "",
 		ignoredTypes: "",
 		propagateHeadersTypes: "function",
-		isLogging: false,
+		logLevel: "off",
 		timeout: 10,
 		attributeMappings: [],
 	});
@@ -725,6 +1296,478 @@ test("node constructor applies defaults for missing optional config", async () =
 	await closeHandler.call(nodeInstance);
 });
 
+test("onSend captures start time and metrics work when traces are disabled", async () => {
+	let NodeConstructor;
+	const mockRed = {
+		nodes: {
+			createNode: (node, config) => {
+				Object.assign(node, config);
+			},
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
+			},
+		},
+		hooks: {
+			listeners: {},
+			add: function (name, listener) {
+				this.listeners[name] = listener;
+			},
+			remove: () => {},
+		},
+	};
+	otelModule(mockRed);
+
+	let closeHandler;
+	const nodeInstance = {
+		on: (event, handler) => {
+			if (event === "close") closeHandler = handler;
+		},
+		status: () => {},
+	};
+
+	NodeConstructor.call(nodeInstance, {
+		url: "http://localhost:4318/v1/traces",
+		metricsUrl: "http://localhost:4318/v1/metrics",
+		logsUrl: "http://localhost:4318/v1/logs",
+		tracesEnabled: false,
+		metricsEnabled: true,
+		logsEnabled: false,
+	});
+
+	const sharedState = getSharedState();
+	const recordSpy = test.mock.fn();
+	sharedState.metrics.requestDuration = { record: recordSpy };
+
+	const onSendListener = mockRed.hooks.listeners["onSend.otel"];
+	const onCompleteListener = mockRed.hooks.listeners["onComplete.otel"];
+	assert.ok(onSendListener);
+	assert.ok(onCompleteListener);
+
+	const msg = {
+		_msgid: "metrics-no-traces",
+		req: { method: "GET", path: "/health", headers: {} },
+		res: { _res: { statusCode: 204 } },
+	};
+	onSendListener([
+		{
+			msg,
+			source: {
+				node: { id: "http-in", type: "http in", name: "HTTP In", z: "flow" },
+			},
+		},
+	]);
+	assert.equal(typeof msg.otelStartTime, "number");
+
+	onCompleteListener({
+		msg,
+		node: {
+			node: {
+				id: "http-resp",
+				type: "http response",
+				name: "HTTP Response",
+				z: "flow",
+			},
+		},
+		error: null,
+	});
+
+	assert.equal(recordSpy.mock.calls.length, 1);
+	await closeHandler.call(nodeInstance);
+});
+
+test("node shutdown should not disable global OpenTelemetry APIs", async () => {
+	let NodeConstructor;
+	const mockRed = {
+		nodes: {
+			createNode: (node, config) => {
+				Object.assign(node, config);
+			},
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
+			},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+	};
+	otelModule(mockRed);
+
+	let closeHandler;
+	const nodeInstance = {
+		on: (event, handler) => {
+			if (event === "close") closeHandler = handler;
+		},
+		status: () => {},
+	};
+
+	NodeConstructor.call(nodeInstance, {
+		url: "http://localhost:4318/v1/traces",
+		protocol: "http",
+		serviceName: "test-service",
+	});
+
+	const traceDisableSpy = test.mock.method(otelApi.trace, "disable");
+	const metricsDisableSpy = test.mock.method(otelApi.metrics, "disable");
+	const logsDisableSpy = test.mock.method(otelLogsApi.logs, "disable");
+
+	await closeHandler.call(nodeInstance);
+
+	assert.equal(traceDisableSpy.mock.calls.length, 0);
+	assert.equal(metricsDisableSpy.mock.calls.length, 0);
+	assert.equal(logsDisableSpy.mock.calls.length, 0);
+});
+
+test("initOTEL does not create providers when all signals are disabled", () => {
+	let NodeConstructor;
+	const mockRed = {
+		nodes: {
+			createNode: (node, config) => {
+				Object.assign(node, config);
+			},
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
+			},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+	};
+	otelModule(mockRed);
+
+	const nodeInstance = {
+		on: () => {},
+		status: () => {},
+	};
+
+	NodeConstructor.call(nodeInstance, {
+		url: "http://localhost:4318/v1/traces",
+		metricsUrl: "http://localhost:4318/v1/metrics",
+		logsUrl: "http://localhost:4318/v1/logs",
+		tracesEnabled: false,
+		metricsEnabled: false,
+		logsEnabled: false,
+	});
+
+	const sharedState = getSharedState();
+	assert.equal(sharedState.provider, null);
+	assert.equal(sharedState.meterProvider, null);
+	assert.equal(sharedState.loggerProvider, null);
+});
+
+test("initOTEL creates only configured signal providers", async () => {
+	let NodeConstructor;
+	const mockRed = {
+		nodes: {
+			createNode: (node, config) => {
+				Object.assign(node, config);
+			},
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
+			},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+	};
+	otelModule(mockRed);
+
+	let closeHandler;
+	const nodeInstance = {
+		on: (event, handler) => {
+			if (event === "close") closeHandler = handler;
+		},
+		status: () => {},
+	};
+
+	NodeConstructor.call(nodeInstance, {
+		url: "http://localhost:4318/v1/traces",
+		metricsUrl: "http://localhost:4318/v1/metrics",
+		logsUrl: "http://localhost:4318/v1/logs",
+		tracesEnabled: false,
+		metricsEnabled: true,
+		logsEnabled: true,
+	});
+
+	const sharedState = getSharedState();
+	assert.equal(sharedState.provider, null);
+	assert.ok(sharedState.meterProvider);
+	assert.ok(sharedState.loggerProvider);
+
+	await closeHandler.call(nodeInstance);
+});
+
+test("node init keeps local providers when global providers are already set", async () => {
+	let NodeConstructor;
+	const mockRed = {
+		nodes: {
+			createNode: (node, config) => {
+				Object.assign(node, config);
+			},
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
+			},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+	};
+	otelModule(mockRed);
+
+	let closeHandler;
+	const nodeInstance = {
+		on: (event, handler) => {
+			if (event === "close") closeHandler = handler;
+		},
+		status: () => {},
+	};
+
+	const tracerSetSpy = test.mock.method(
+		otelApi.trace,
+		"setGlobalTracerProvider",
+		() => false,
+	);
+	const meterSetSpy = test.mock.method(
+		otelApi.metrics,
+		"setGlobalMeterProvider",
+		() => false,
+	);
+	const loggerSetSpy = test.mock.method(
+		otelLogsApi.logs,
+		"setGlobalLoggerProvider",
+		(existingProvider) => ({ other: true, existingProvider }),
+	);
+
+	NodeConstructor.call(nodeInstance, {
+		url: "http://localhost:4318/v1/traces",
+		metricsUrl: "http://localhost:4318/v1/metrics",
+		logsUrl: "http://localhost:4318/v1/logs",
+		protocol: "http",
+		serviceName: "test-service",
+		metricsEnabled: true,
+		logsEnabled: true,
+	});
+
+	const sharedState = getSharedState();
+	assert.equal(tracerSetSpy.mock.calls.length, 1);
+	assert.equal(meterSetSpy.mock.calls.length, 1);
+	assert.equal(loggerSetSpy.mock.calls.length, 1);
+	assert.ok(sharedState.provider);
+	assert.ok(sharedState.tracer);
+	assert.ok(sharedState.meterProvider);
+	assert.ok(sharedState.loggerProvider);
+	assert.ok(sharedState.logger);
+
+	await closeHandler.call(nodeInstance);
+});
+
+test("runtime plugin onSettings does not leak lifecycle ref count", async () => {
+	let runtimePlugin;
+	const mockRed = {
+		nodes: {
+			createNode: () => {},
+			registerType: () => {},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+		plugins: {
+			registerRuntimePlugin: (plugin) => {
+				runtimePlugin = plugin;
+			},
+		},
+	};
+
+	otelModule(mockRed);
+	assert.ok(runtimePlugin);
+
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			protocol: "http",
+		},
+	});
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			protocol: "http",
+		},
+	});
+	assert.equal(getSharedState().refCount, 1);
+
+	await runtimePlugin.onClose();
+	assert.equal(getSharedState().refCount, 0);
+});
+
+test("runtime plugin onSettings updates runtime config without extra lifecycle ref", async () => {
+	let runtimePlugin;
+	const mockRed = {
+		nodes: {
+			createNode: () => {},
+			registerType: () => {},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+		plugins: {
+			registerRuntimePlugin: (plugin) => {
+				runtimePlugin = plugin;
+			},
+		},
+	};
+
+	otelModule(mockRed);
+	assert.ok(runtimePlugin);
+
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			logLevel: "warn",
+			timeout: 10,
+		},
+	});
+	assert.equal(getSharedState().refCount, 1);
+	assert.equal(getSharedState().logLevel, "warn");
+	assert.equal(getSharedState().timeout, 10000);
+
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			logLevel: "debug",
+			timeout: 3,
+		},
+	});
+	assert.equal(getSharedState().refCount, 1);
+	assert.equal(getSharedState().logLevel, "debug");
+	assert.equal(getSharedState().timeout, 3000);
+
+	await runtimePlugin.onClose();
+	assert.equal(getSharedState().refCount, 0);
+});
+
+test("runtime plugin onSettings reconfigures active providers", async () => {
+	let runtimePlugin;
+	const mockRed = {
+		nodes: {
+			createNode: () => {},
+			registerType: () => {},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+		plugins: {
+			registerRuntimePlugin: (plugin) => {
+				runtimePlugin = plugin;
+			},
+		},
+	};
+
+	otelModule(mockRed);
+	assert.ok(runtimePlugin);
+
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			tracesEnabled: true,
+			metricsEnabled: false,
+			logsEnabled: false,
+		},
+	});
+
+	assert.ok(getSharedState().provider);
+	assert.equal(getSharedState().meterProvider, null);
+	assert.equal(getSharedState().loggerProvider, null);
+	assert.equal(getSharedState().refCount, 1);
+
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			metricsUrl: "http://localhost:4318/v1/metrics",
+			logsUrl: "http://localhost:4318/v1/logs",
+			tracesEnabled: false,
+			metricsEnabled: true,
+			logsEnabled: true,
+		},
+	});
+
+	assert.equal(getSharedState().provider, null);
+	assert.ok(getSharedState().meterProvider);
+	assert.ok(getSharedState().loggerProvider);
+	assert.equal(getSharedState().refCount, 1);
+
+	await runtimePlugin.onClose();
+	assert.equal(getSharedState().refCount, 0);
+});
+
+test("runtime plugin onSettings awaits provider shutdown before reconfigure", async () => {
+	let runtimePlugin;
+	const mockRed = {
+		nodes: {
+			createNode: () => {},
+			registerType: () => {},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+		plugins: {
+			registerRuntimePlugin: (plugin) => {
+				runtimePlugin = plugin;
+			},
+		},
+	};
+
+	otelModule(mockRed);
+	assert.ok(runtimePlugin);
+
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			tracesEnabled: true,
+			metricsEnabled: false,
+			logsEnabled: false,
+		},
+	});
+
+	const sharedState = getSharedState();
+	assert.ok(sharedState.provider);
+	const oldProvider = sharedState.provider;
+	let resolveShutdown;
+	let shutdownCompleted = false;
+	oldProvider.shutdown = () =>
+		new Promise((resolve) => {
+			resolveShutdown = () => {
+				shutdownCompleted = true;
+				resolve();
+			};
+		});
+
+	const reconfigurePromise = runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			tracesEnabled: true,
+			metricsEnabled: false,
+			logsEnabled: false,
+		},
+	});
+
+	await Promise.resolve();
+	assert.equal(shutdownCompleted, false);
+
+	resolveShutdown();
+	await reconfigurePromise;
+	assert.equal(shutdownCompleted, true);
+	assert.notEqual(getSharedState().provider, oldProvider);
+
+	await runtimePlugin.onClose();
+});
+
 test("onSend.otel hook creates spans for every event in batch", async () => {
 	let NodeConstructor;
 	const mockRed = {
@@ -762,7 +1805,7 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 		rootPrefix: "",
 		ignoredTypes: "",
 		propagateHeadersTypes: "",
-		isLogging: false,
+		logLevel: "off",
 		timeout: 10,
 		attributeMappings: [],
 	});
@@ -784,6 +1827,59 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 	assert.equal(getMsgSpans().size, 2);
 
 	await closeHandler.call(nodeInstance);
+});
+
+test("node close waits for provider shutdown before invoking done", async () => {
+	let NodeConstructor;
+	const mockRed = {
+		nodes: {
+			createNode: (node, config) => {
+				Object.assign(node, config);
+			},
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
+			},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+	};
+	otelModule(mockRed);
+
+	let closeHandler;
+	let doneCalled = false;
+	const nodeInstance = {
+		on: (event, handler) => {
+			if (event === "close") closeHandler = handler;
+		},
+		status: () => {},
+	};
+
+	NodeConstructor.call(nodeInstance, {
+		url: "http://localhost:4318/v1/traces",
+		tracesEnabled: true,
+		metricsEnabled: false,
+		logsEnabled: false,
+	});
+
+	const sharedState = getSharedState();
+	assert.ok(sharedState.provider);
+	let resolveShutdown;
+	sharedState.provider.shutdown = () =>
+		new Promise((resolve) => {
+			resolveShutdown = resolve;
+		});
+
+	const closePromise = closeHandler.call(nodeInstance, () => {
+		doneCalled = true;
+	});
+	await Promise.resolve();
+	assert.equal(doneCalled, false);
+
+	resolveShutdown();
+	await closePromise;
+	assert.equal(doneCalled, true);
 });
 
 test("endSpan should handle orphan spans from switch nodes", () => {
@@ -825,4 +1921,31 @@ test("endSpan should handle orphan spans from switch nodes", () => {
 
 	// The parent span should be ended because the only remaining child is an orphan
 	assert.equal(getMsgSpans().size, 0);
+});
+
+test("endSpan keeps parent active when remaining child span is non-orphan", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const msg = { _msgid: "active-child-msg" };
+	const functionNodeA = {
+		id: "function-node-a",
+		type: "function",
+		name: "Function A",
+		z: "flow",
+	};
+	const functionNodeB = {
+		id: "function-node-b",
+		type: "function",
+		name: "Function B",
+		z: "flow",
+	};
+
+	createSpan(mockRed, tracer, msg, functionNodeA, {}, false);
+	createSpan(mockRed, tracer, msg, functionNodeB, {}, false);
+	endSpan(mockRed, msg, null, functionNodeA);
+
+	const parent = getMsgSpans().get("active-child-msg");
+	assert.ok(parent);
+	assert.equal(parent.spans.has("active-child-msg#function-node-b"), true);
 });
