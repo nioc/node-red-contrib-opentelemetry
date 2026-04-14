@@ -13,7 +13,6 @@ Module._resolveFilename = function (request, parent, isMain, options) {
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const otelModule = require("../lib/opentelemetry-node");
-const exporterModule = require("../lib/prometheus-exporter");
 Module._resolveFilename = originalResolveFilename;
 
 test("OpenTelemetry node contention: nodes share state and hooks are reference counted", async () => {
@@ -40,6 +39,9 @@ test("OpenTelemetry node contention: nodes share state and hooks are reference c
 				hooksRemoved++;
 			},
 		},
+		plugins: {
+			registerRuntimePlugin: () => {},
+		},
 	};
 
 	otelModule(mockRed);
@@ -61,14 +63,22 @@ test("OpenTelemetry node contention: nodes share state and hooks are reference c
 
 	OpenTelemetry.call(node1, {
 		url: "http://localhost:4318/v1/traces",
+		metricsUrl: "http://localhost:4318/v1/metrics",
+		logsUrl: "http://localhost:4318/v1/logs",
+		tracesEnabled: true,
+		metricsEnabled: true,
+		logsEnabled: true,
 		isLogging: true,
 		timeout: 10,
 	});
 
-	// Verify first node registered hooks
+	// Verify first node registered hooks and providers
 	assert.equal(sharedState.refCount, 1);
 	assert.equal(hooksAdded, 6); // onSend, preDeliver, postDeliver, postReceive, onReceive, onComplete
 	assert.equal(sharedState.isLogging, true);
+	assert.ok(sharedState.provider);
+	assert.ok(sharedState.meterProvider);
+	assert.ok(sharedState.loggerProvider);
 
 	OpenTelemetry.call(node2, {
 		url: "http://localhost:4318/v1/traces",
@@ -91,67 +101,7 @@ test("OpenTelemetry node contention: nodes share state and hooks are reference c
 	// FIXED: Hooks finally removed
 	assert.equal(sharedState.refCount, 0);
 	assert.equal(hooksRemoved, 1);
-});
-
-test("Prometheus exporter contention: multiple nodes on same port share exporter", async () => {
-	exporterModule.__test__.resetState();
-	const state = exporterModule.__test__.getState();
-	assert.equal(state.exporter, undefined);
-
-	// Mocking dependencies to avoid actual server start
-	exporterModule.__test__.setDependencies({
-		PrometheusExporter: class {
-			constructor(opts, cb) {
-				this.opts = opts;
-				this.shutdownCalled = false;
-				setImmediate(() => cb(null));
-			}
-			async shutdown() {
-				this.shutdownCalled = true;
-			}
-		},
-		MeterProvider: class {
-			getMeter() {
-				return { createHistogram: () => ({ record: () => {} }) };
-			}
-		},
-		View: class {},
-		ExplicitBucketHistogramAggregation: class {},
-		Resource: class {},
-	});
-
-	await exporterModule.startHttpInExporter(9090, "/metrics", "h1");
-	const exporter1 = exporterModule.__test__.getExporters().get("9090/metrics")
-		.exporter;
-	assert.equal(
-		exporterModule.__test__.getExporters().get("9090/metrics").refCount,
-		1,
-	);
-
-	await exporterModule.startHttpInExporter(9090, "/metrics", "h2");
-	const exporter2 = exporterModule.__test__.getExporters().get("9090/metrics")
-		.exporter;
-
-	// FIXED: They share the same exporter instance
-	assert.equal(exporter1, exporter2);
-	assert.equal(
-		exporterModule.__test__.getExporters().get("9090/metrics").refCount,
-		2,
-	);
-
-	await exporterModule.stopHttpInExporter(9090, "/metrics");
-	// FIXED: Exporter still active because refCount is 1
-	assert.equal(
-		exporterModule.__test__.getExporters().get("9090/metrics").refCount,
-		1,
-	);
-	assert.equal(exporter1.shutdownCalled, false);
-
-	await exporterModule.stopHttpInExporter(9090, "/metrics");
-	// FIXED: Exporter finally shut down
-	assert.equal(
-		exporterModule.__test__.getExporters().has("9090/metrics"),
-		false,
-	);
-	assert.equal(exporter1.shutdownCalled, true);
+	assert.equal(sharedState.provider, null);
+	assert.equal(sharedState.meterProvider, null);
+	assert.equal(sharedState.loggerProvider, null);
 });

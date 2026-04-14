@@ -2,7 +2,7 @@ This file provides instructions for AI agents working with this repository.
 
 ## Project Overview
 
-This project is a Node-RED module for OpenTelemetry and Prometheus.
+This project is a Node-RED module for OpenTelemetry (Traces, Metrics, Logs).
 
 ## Getting Started
 
