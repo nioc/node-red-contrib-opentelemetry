@@ -68,21 +68,21 @@ test("OpenTelemetry node contention: nodes share state and hooks are reference c
 		tracesEnabled: true,
 		metricsEnabled: true,
 		logsEnabled: true,
-		isLogging: true,
+		logLevel: "debug",
 		timeout: 10,
 	});
 
 	// Verify first node registered hooks and providers
 	assert.equal(sharedState.refCount, 1);
 	assert.equal(hooksAdded, 6); // onSend, preDeliver, postDeliver, postReceive, onReceive, onComplete
-	assert.equal(sharedState.isLogging, true);
+	assert.equal(sharedState.logLevel, "debug");
 	assert.ok(sharedState.provider);
 	assert.ok(sharedState.meterProvider);
 	assert.ok(sharedState.loggerProvider);
 
 	OpenTelemetry.call(node2, {
 		url: "http://localhost:4318/v1/traces",
-		isLogging: false,
+		logLevel: "warn",
 		timeout: 20,
 	});
 
@@ -90,7 +90,7 @@ test("OpenTelemetry node contention: nodes share state and hooks are reference c
 	assert.equal(sharedState.refCount, 2);
 	assert.equal(hooksAdded, 6);
 	// FIXED: Latest config wins (expected behavior for global features)
-	assert.equal(sharedState.isLogging, false);
+	assert.equal(sharedState.logLevel, "warn");
 
 	await close1.call(node1);
 	// FIXED: Hooks NOT removed yet
@@ -100,7 +100,7 @@ test("OpenTelemetry node contention: nodes share state and hooks are reference c
 	await close2.call(node2);
 	// FIXED: Hooks finally removed
 	assert.equal(sharedState.refCount, 0);
-	assert.equal(hooksRemoved, 1);
+	assert.equal(hooksRemoved, 6);
 	assert.equal(sharedState.provider, null);
 	assert.equal(sharedState.meterProvider, null);
 	assert.equal(sharedState.loggerProvider, null);
