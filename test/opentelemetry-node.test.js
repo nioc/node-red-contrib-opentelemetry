@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const otelModule = require("../lib/opentelemetry-node");
+const otelModule = require("../dist/opentelemetry-node");
 
 const mockRed = {
 	nodes: {
@@ -362,7 +362,14 @@ test("endSpan should handle http request and response correctly", () => {
 		name: "HTTP Request",
 		z: "flow",
 	};
-	const childSpan = createSpan(mockRed, tracer, { _msgid: "1" }, node, {}, false);
+	const childSpan = createSpan(
+		mockRed,
+		tracer,
+		{ _msgid: "1" },
+		node,
+		{},
+		false,
+	);
 	endSpan(mockRed, msg, null, node);
 	assert.equal(childSpan.ended, true);
 	assert.deepEqual(childSpan.attributes["http.response.status_code"], 200);
@@ -429,15 +436,15 @@ test("endSpan should set span status to ERROR on error", () => {
 	assert.equal(parentSetStatusSpy.mock.calls.length, 1);
 });
 
-test("postDeliver.otel hook injects trace context for http and mqtt", async (t) => {
+test("postDeliver.otel hook injects trace context for http and mqtt", async (_t) => {
 	let NodeConstructor;
 	const mockRed = {
 		nodes: {
-			createNode: function (node, config) {
+			createNode: (node, config) => {
 				Object.assign(node, config);
 			},
-			registerType: (name, constructor) => {
-				NodeConstructor = constructor;
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
 			},
 		},
 		hooks: {
@@ -448,7 +455,9 @@ test("postDeliver.otel hook injects trace context for http and mqtt", async (t) 
 			remove: function (pattern) {
 				Object.keys(this.listeners)
 					.filter((name) => name.endsWith(pattern.substring(1)))
-					.forEach((name) => delete this.listeners[name]);
+					.forEach((name) => {
+						delete this.listeners[name];
+					});
 			},
 		},
 	};
@@ -530,11 +539,11 @@ test("preDeliver.otel hook clears all propagated trace headers safely", () => {
 	let NodeConstructor;
 	const mockRed = {
 		nodes: {
-			createNode: function (node, config) {
+			createNode: (node, config) => {
 				Object.assign(node, config);
 			},
-			registerType: (_name, constructor) => {
-				NodeConstructor = constructor;
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
 			},
 		},
 		hooks: {
@@ -600,11 +609,11 @@ test("onReceive.otel hook sets otelRootMsgId for split nodes", () => {
 	let NodeConstructor;
 	const mockRed = {
 		nodes: {
-			createNode: function (node, config) {
+			createNode: (node, config) => {
 				Object.assign(node, config);
 			},
-			registerType: (name, constructor) => {
-				NodeConstructor = constructor;
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
 			},
 		},
 		hooks: {
@@ -647,11 +656,11 @@ test("node constructor applies defaults for missing optional config", async () =
 	let NodeConstructor;
 	const mockRed = {
 		nodes: {
-			createNode: function (node, config) {
+			createNode: (node, config) => {
 				Object.assign(node, config);
 			},
-			registerType: (_name, constructor) => {
-				NodeConstructor = constructor;
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
 			},
 			getNode: (id) => ({ name: `Flow ${id}` }),
 		},
@@ -720,11 +729,11 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 	let NodeConstructor;
 	const mockRed = {
 		nodes: {
-			createNode: function (node, config) {
+			createNode: (node, config) => {
 				Object.assign(node, config);
 			},
-			registerType: (_name, constructor) => {
-				NodeConstructor = constructor;
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
 			},
 			getNode: (id) => ({ name: `Flow ${id}` }),
 		},
@@ -733,7 +742,7 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 			add: function (name, listener) {
 				this.listeners[name] = listener;
 			},
-			remove: function (_pattern) {},
+			remove: (_pattern) => {},
 		},
 	};
 	otelModule(mockRed);
@@ -801,7 +810,14 @@ test("endSpan should handle orphan spans from switch nodes", () => {
 	assert.ok(parent);
 
 	// Create a function span that will be ended
-	const functionSpan = createSpan(mockRed, tracer, msg, functionNode, {}, false);
+	const functionSpan = createSpan(
+		mockRed,
+		tracer,
+		msg,
+		functionNode,
+		{},
+		false,
+	);
 	assert.ok(functionSpan);
 
 	// End the function span. This should trigger the orphan logic for the switch span.

@@ -1,58 +1,64 @@
-const os = require("os");
-const { name, version } = require("../package.json");
-const {
-	trace,
+import os from "node:os";
+import type {
+	NodeAPI,
+	NodeDef,
+	NodeMessageInFlow,
+	Node as RedNodeInstance,
+} from "@node-red/registry";
+import {
+	type Context,
 	context,
+	defaultTextMapGetter,
+	defaultTextMapSetter,
+	type Histogram,
+	metrics,
+	type Span,
 	SpanKind,
 	SpanStatusCode,
-	metrics,
-} = require("@opentelemetry/api");
-const { logs, SeverityNumber } = require("@opentelemetry/api-logs");
-const { Resource } = require("@opentelemetry/resources");
-const {
-	ATTR_SERVICE_NAME,
-	ATTR_HTTP_RESPONSE_STATUS_CODE,
-	ATTR_URL_PATH,
-	ATTR_SERVER_ADDRESS,
-	ATTR_SERVER_PORT,
-	ATTR_URL_SCHEME,
-	ATTR_HTTP_REQUEST_METHOD,
-	ATTR_CLIENT_ADDRESS,
-	ATTR_USER_AGENT_ORIGINAL,
-	ATTR_HTTP_REQUEST_HEADER,
-} = require("@opentelemetry/semantic-conventions");
-const {
-	ATTR_HOST_NAME,
-	ATTR_CODE_FUNCTION,
-} = require("@opentelemetry/semantic-conventions/incubating");
-const {
-	BasicTracerProvider,
-	BatchSpanProcessor,
-} = require("@opentelemetry/sdk-trace-base");
-const {
-	MeterProvider,
-	PeriodicExportingMetricReader,
-} = require("@opentelemetry/sdk-metrics");
-const {
-	LoggerProvider,
-	BatchLogRecordProcessor,
-} = require("@opentelemetry/sdk-logs");
-const {
-	B3InjectEncoding,
-	B3Propagator,
-} = require("@opentelemetry/propagator-b3");
-const { JaegerPropagator } = require("@opentelemetry/propagator-jaeger");
-const {
+	type Tracer,
+	trace,
+} from "@opentelemetry/api";
+import { type Logger, logs, SeverityNumber } from "@opentelemetry/api-logs";
+import {
 	CompositePropagator,
 	W3CBaggagePropagator,
 	W3CTraceContextPropagator,
-} = require("@opentelemetry/core");
-const { clearInterval } = require("timers");
-const {
-	defaultTextMapGetter,
-	defaultTextMapSetter,
-} = require("@opentelemetry/api");
-const jmespath = require("jmespath");
+} from "@opentelemetry/core";
+import { B3InjectEncoding, B3Propagator } from "@opentelemetry/propagator-b3";
+import { JaegerPropagator } from "@opentelemetry/propagator-jaeger";
+import { Resource } from "@opentelemetry/resources";
+import {
+	BatchLogRecordProcessor,
+	LoggerProvider,
+} from "@opentelemetry/sdk-logs";
+import {
+	MeterProvider,
+	PeriodicExportingMetricReader,
+} from "@opentelemetry/sdk-metrics";
+import {
+	BasicTracerProvider,
+	BatchSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
+import {
+	ATTR_CLIENT_ADDRESS,
+	ATTR_HTTP_REQUEST_HEADER,
+	ATTR_HTTP_REQUEST_METHOD,
+	ATTR_HTTP_RESPONSE_STATUS_CODE,
+	ATTR_SERVER_ADDRESS,
+	ATTR_SERVER_PORT,
+	ATTR_SERVICE_NAME,
+	ATTR_URL_PATH,
+	ATTR_URL_SCHEME,
+	ATTR_USER_AGENT_ORIGINAL,
+} from "@opentelemetry/semantic-conventions";
+import {
+	ATTR_CODE_FUNCTION,
+	ATTR_HOST_NAME,
+} from "@opentelemetry/semantic-conventions/incubating";
+import jmespath from "jmespath";
+import { name, version } from "../package.json";
+
+declare module "jmespath";
 
 /**
  * @typedef {import('@opentelemetry/api').Tracer} Tracer
@@ -79,8 +85,134 @@ const fakeSpan = {
  */
 const msgSpans = new Map();
 
+/**
+ * Represents the OpenTelemetry Node-RED node configuration
+ */
+interface OTELConfig {
+	url?: string;
+	metricsUrl?: string;
+	logsUrl?: string;
+	protocol?: string;
+	serviceName?: string;
+	tracesEnabled?: boolean;
+	metricsEnabled?: boolean;
+	logsEnabled?: boolean;
+	rootPrefix?: string;
+	ignoredTypes?: string;
+	propagateHeadersTypes?: string;
+	isLogging?: boolean;
+	timeout?: number;
+	attributeMappings?: AttributeMapping[];
+}
+
+interface AttributeMapping {
+	key: string;
+	path: string;
+	flow?: string;
+	nodeType?: string;
+	isAfter?: boolean;
+	[key: string]: unknown;
+}
+
+interface ResolvedOTELConfig {
+	url?: string;
+	metricsUrl?: string;
+	logsUrl?: string;
+	protocol: string;
+	serviceName: string;
+	tracesEnabled: boolean;
+	metricsEnabled: boolean;
+	logsEnabled: boolean;
+	rootPrefix: string;
+	ignoredTypes: string;
+	propagateHeadersTypes: string;
+	isLogging: boolean;
+	timeout: number;
+	attributeMappings: AttributeMapping[];
+}
+
+interface RuntimeRequest {
+	headers: Record<string, string | undefined>;
+	ip?: string;
+	method?: string;
+	path?: string;
+}
+
+interface RuntimeResponse {
+	_res?: { statusCode?: number };
+}
+
+interface OTelSpanExtension {
+	attributes?: Record<string, unknown>;
+	_creationTimestamp?: number;
+	updateName?: (name: string) => void;
+	name?: string;
+}
+
+type OTELNodeDef = NodeDef & OTELConfig;
+type RuntimeNodeDef = NodeDef & {
+	url?: string;
+	method?: string;
+	serverConfig?: { path: string };
+	[key: string]: unknown;
+};
+type RuntimeMessage = NodeMessageInFlow & {
+	otelRootMsgId?: string;
+	otelStartTime?: number;
+	z?: string;
+	headers?: Record<string, string>;
+	userProperties?: Record<string, unknown>;
+	properties?: { headers: Record<string, string> };
+	req?: RuntimeRequest;
+	res?: RuntimeResponse;
+	statusCode?: number;
+	responseUrl?: string;
+	error?: unknown;
+	[key: string]: unknown;
+};
+type RuntimeHookEvent = {
+	msg: RuntimeMessage;
+	source?: { node: RuntimeNodeDef };
+	destination?: { node: RuntimeNodeDef };
+	node?: { node: RuntimeNodeDef };
+	error?: unknown;
+};
+type RuntimePluginRegistration = {
+	id: string;
+	onSettings?: (settings: unknown) => void;
+	onClose?: () => Promise<void> | void;
+	[key: string]: unknown;
+};
+type RuntimeApi = NodeAPI & {
+	plugins: NodeAPI["plugins"] & {
+		registerRuntimePlugin?: (plugin: RuntimePluginRegistration) => void;
+	};
+};
+
+/**
+ * Shared state structure for all node instances
+ */
+interface SharedState {
+	isLogging: boolean;
+	rootPrefix: string;
+	timeout: number;
+	attributeMappings: AttributeMapping[];
+	ignoredTypesList: string[];
+	propagateHeadersTypesList: string[];
+	tracer: Tracer | null;
+	provider: BasicTracerProvider | null;
+	meterProvider: MeterProvider | null;
+	loggerProvider: LoggerProvider | null;
+	logger: Logger | null;
+	metrics: {
+		requestDuration: Histogram | null;
+	};
+	intervalId: NodeJS.Timeout | null;
+	refCount: number;
+}
+
 // Shared state for all node instances
-const sharedState = {
+const sharedState: SharedState = {
 	isLogging: false,
 	rootPrefix: "",
 	timeout: 10_000,
@@ -109,14 +241,15 @@ const DEFAULT_IGNORED_TYPES = "debug,catch";
 const DEFAULT_PROPAGATE_HEADERS_TYPES = "";
 const DEFAULT_TIMEOUT_SECONDS = 10;
 
-function splitCsv(value) {
+function splitCsv(value: string | undefined | null): string[] {
 	return String(value ?? "")
 		.split(",")
 		.map((key) => key.trim())
 		.filter((key) => key.length > 0);
 }
 
-function ensureTracesPath(urlValue) {
+function ensureTracesPath(urlValue: string | undefined): string | undefined {
+	if (!urlValue) return urlValue;
 	try {
 		const parsed = new URL(String(urlValue));
 		if (parsed.pathname === "/" || parsed.pathname === "") {
@@ -128,7 +261,9 @@ function ensureTracesPath(urlValue) {
 	}
 }
 
-function resolveProtocol(value) {
+function resolveProtocol(
+	value: string | undefined,
+): "proto" | "http" | undefined {
 	const normalized = String(value ?? "")
 		.trim()
 		.toLowerCase();
@@ -146,7 +281,7 @@ function resolveProtocol(value) {
 	}
 }
 
-function resolveOpenTelemetryConfig(config) {
+function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 	const env = process.env;
 	const tracesEndpoint = env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT;
 	const metricsEndpoint = env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT;
@@ -202,7 +337,7 @@ function resolveOpenTelemetryConfig(config) {
 	};
 }
 
-function normalizeTimeoutMs(timeoutSeconds) {
+function normalizeTimeoutMs(timeoutSeconds: string | number): number {
 	const parsedValue = Number(timeoutSeconds);
 	if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
 		return 10_000;
@@ -210,7 +345,7 @@ function normalizeTimeoutMs(timeoutSeconds) {
 	return parsedValue * 1000;
 }
 
-function sanitizeAttributeMappings(mappings) {
+function sanitizeAttributeMappings(mappings: unknown): AttributeMapping[] {
 	if (!Array.isArray(mappings)) {
 		return [];
 	}
@@ -218,10 +353,11 @@ function sanitizeAttributeMappings(mappings) {
 		if (!mapping || typeof mapping !== "object") {
 			return false;
 		}
-		const key = String(mapping.key ?? "").trim();
-		const path = String(mapping.path ?? "").trim();
+		const typedMapping = mapping as Partial<AttributeMapping>;
+		const key = String(typedMapping.key ?? "").trim();
+		const path = String(typedMapping.path ?? "").trim();
 		return key.length > 0 && path.length > 0;
-	});
+	}) as AttributeMapping[];
 }
 
 const propagator = new CompositePropagator({
@@ -238,20 +374,23 @@ const propagator = new CompositePropagator({
 
 /**
  * Get parent span id or current message id if there is none
- * @param {any} msg Message data to be used to retrieve the parent span id `otelRootMsgId`
+ * @param {{ otelRootMsgId?: string; _msgid: string }} msg Message data to be used to retrieve the parent span id `otelRootMsgId`
  * @returns {string}
  */
-function getMsgId(msg) {
+function getMsgId(msg: { otelRootMsgId?: string; _msgid: string }): string {
 	return msg.otelRootMsgId ? msg.otelRootMsgId : msg._msgid;
 }
 
 /**
  * Return the span identifier for this node and message
- * @param {any} msg Message data to be used to retrieve the parent message id
- * @param {any} nodeDefinition Current node definition
+ * @param {{ otelRootMsgId?: string; _msgid: string }} msg Message data to be used to retrieve the parent message id
+ * @param {NodeDef} nodeDefinition Current node definition
  * @returns {string}
  */
-function getSpanId(msg, nodeDefinition) {
+function getSpanId(
+	msg: { otelRootMsgId?: string; _msgid: string },
+	nodeDefinition: NodeDef,
+): string {
 	const msgId =
 		nodeDefinition.type === "split" && msg.otelRootMsgId
 			? msg.otelRootMsgId
@@ -261,33 +400,45 @@ function getSpanId(msg, nodeDefinition) {
 
 /**
  * Get the name of a flow (or subflow) by its ID
- * @param {any} RED Node-RED runtime object
+ * @param {RuntimeApi} RED Node-RED runtime object
  * @param {string} flowId
  * @returns {string|undefined}
  */
-function getFlowName(RED, flowId) {
+function getFlowName(RED: RuntimeApi, flowId: string): string | undefined {
 	if (!RED || !flowId) return undefined;
-	const flow = RED.nodes.getNode(flowId);
-	return flow ? flow.name : undefined;
+	const flow = RED.nodes.getNode(flowId) as RedNodeInstance | undefined;
+	return flow?.name;
 }
 
 /**
- * @param {any} RED Node-RED runtime object
- * @param {any} node OTEL node (for using Node-RED utilities)
+ * @param {RuntimeApi} RED Node-RED runtime object
+ * @param {NodeDef | null} node OTEL node (for using Node-RED utilities)
  * @param {string} eventType
- * @param {any} event
+ * @param {RuntimeHookEvent} event
  * @returns
  */
-function logEvent(RED, node, eventType, event) {
+/**
+ * @param {RuntimeApi} RED Node-RED runtime object
+ * @param {NodeDef | null} node OTEL node (for using Node-RED utilities)
+ * @param {string} eventType
+ * @param {RuntimeHookEvent} event
+ * @returns {void}
+ */
+function logEvent(
+	RED: RuntimeApi,
+	_node: NodeDef | null,
+	eventType: string,
+	event: RuntimeHookEvent,
+): void {
 	if (!sharedState.isLogging && !sharedState.logger) {
 		return;
 	}
 	try {
 		const msgId = getMsgId(event.msg);
 		const _msgId = event.msg._msgid;
-		const flowName = getFlowName(RED, event.msg.z);
+		const flowName = event.msg.z ? getFlowName(RED, event.msg.z) : undefined;
 		let logMsg = `rootMsgId: ${msgId}, _msgId: ${_msgId}:`;
-		const attributes = {
+		const attributes: Record<string, string> = {
 			[ATTR_MSG_ID]: msgId,
 			"node_red.msg._msgid": _msgId,
 			"node_red.event_type": eventType,
@@ -296,17 +447,17 @@ function logEvent(RED, node, eventType, event) {
 			attributes[ATTR_FLOW_NAME] = flowName;
 		}
 
-		if (event.source && event.source.node) {
+		if (event.source?.node) {
 			logMsg += ` src: ${event.source.node.type} ${event.source.node.id}`;
 			attributes[ATTR_NODE_ID] = event.source.node.id;
 			attributes[ATTR_NODE_TYPE] = event.source.node.type;
 		}
-		if (event.destination && event.destination.node) {
+		if (event.destination?.node) {
 			logMsg += ` >> dest: ${event.destination.node.type} ${event.destination.node.id}`;
 			attributes["node_red.destination.id"] = event.destination.node.id;
 			attributes["node_red.destination.type"] = event.destination.node.type;
 		}
-		if (event.node && event.node.node) {
+		if (event.node?.node) {
 			logMsg += ` ## node: ${event.node.node.type} ${event.node.node.id}`;
 			attributes[ATTR_NODE_ID] = event.node.node.id;
 			attributes[ATTR_NODE_TYPE] = event.node.node.type;
@@ -333,7 +484,7 @@ function logEvent(RED, node, eventType, event) {
 /**
  * Delete outdated message spans
  */
-function deleteOutdatedMsgSpans() {
+function deleteOutdatedMsgSpans(): void {
 	const now = Date.now();
 	try {
 		for (const [msgId, msgSpan] of msgSpans) {
@@ -356,10 +507,10 @@ function deleteOutdatedMsgSpans() {
 /**
  * Attribute value must be a non-null string, boolean, floating point value, integer, or an array of these values
  * ({@link https://opentelemetry.io/docs/concepts/signals/traces/#attributes OTEL doc})
- * @param {any} input Data whose type needs to be tested
+ * @param {unknown} input Data whose type needs to be tested
  * @returns {boolean} Is the input data a primitive?
  **/
-function isPrimitive(input) {
+function isPrimitive(input: unknown): boolean {
 	if (Array.isArray(input)) {
 		return input.every(isPrimitive);
 	}
@@ -369,16 +520,21 @@ function isPrimitive(input) {
 /**
  * Use message data to provide user custom span attributes
  * @param {boolean} isAfter Should attribute analysis be after node processing?
- * @param {any} data Message data to be used for parsing
+ * @param {unknown} data Message data to be used for parsing
  * @param {string} flowId Flow identifier
  * @param {string} nodeType Node type (ex: `http in`, `function`)
  * @returns {Record<string, string | number | boolean > | undefined} Custom attributes as record or undefined
  */
-function parseAttribute(isAfter, data, flowId, nodeType) {
+function parseAttribute(
+	isAfter: boolean,
+	data: unknown,
+	flowId: string,
+	nodeType: string,
+): Record<string, string | number | boolean> | undefined {
 	if (sharedState.attributeMappings.length === 0) {
 		return;
 	}
-	const attributes = {};
+	const attributes: Record<string, string | number | boolean> = {};
 	sharedState.attributeMappings
 		.filter(
 			(mapping) =>
@@ -394,7 +550,7 @@ function parseAttribute(isAfter, data, flowId, nodeType) {
 				}
 			} catch (error) {
 				console.warn(
-					`An error occurred during span attribute parsing (key: ${mapping.key}, path: ${mapping.path}): ${error.message}`,
+					`An error occurred during span attribute parsing (key: ${mapping.key}, path: ${mapping.path}): ${(error as Error).message}`,
 				);
 			}
 		});
@@ -403,15 +559,21 @@ function parseAttribute(isAfter, data, flowId, nodeType) {
 
 /**
  * Create a span for this node and message
- * @param {any} RED Node-RED runtime object
+ * @param {RuntimeApi} RED Node-RED runtime object
  * @param {Tracer} tracer Tracer used for creating spans
- * @param {any} msg Complete message data
- * @param {any} nodeDefinition Current node definition
- * @param {any} node OTEL node (for using Node-RED utilities)
+ * @param {RuntimeMessage} msg Complete message data
+ * @param {NodeDef} nodeDefinition Current node definition
  * @param {boolean} isNotTraced Is the node should be traced?
  * @returns {Span|undefined} Created span
  */
-function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
+function createSpan(
+	RED: RuntimeApi,
+	tracer: Tracer,
+	msg: RuntimeMessage,
+	nodeDefinition: RuntimeNodeDef,
+	_node: RedNodeInstance | null,
+	isNotTraced: boolean,
+): Span | undefined {
 	try {
 		// check and get message id (handle root message id for splitted parts)
 		const msgId = getMsgId(msg);
@@ -420,7 +582,8 @@ function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
 		}
 		// check and get span id (msg id and node id)
 		const spanId = getSpanId(msg, nodeDefinition);
-		if (msgSpans.has(msgId) && msgSpans.get(msgId).spans.has(spanId)) {
+		const existingParent = msgSpans.get(msgId);
+		if (msgSpans.has(msgId) && existingParent?.spans.has(spanId)) {
 			return;
 		}
 
@@ -428,7 +591,9 @@ function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
 		const spanName = nodeDefinition.name || nodeDefinition.type;
 		const flowName = getFlowName(RED, nodeDefinition.z);
 		const now = Date.now();
-		let parentSpan, ctx, kind;
+		let parentSpan: Span | undefined;
+		let ctx: Context | undefined;
+		let kind: SpanKind;
 
 		// try to set span kind
 		switch (nodeDefinition.type) {
@@ -457,7 +622,7 @@ function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
 		}
 
 		// prepare common attributes
-		const commonAttributes = {
+		const commonAttributes: Record<string, string | undefined> = {
 			[ATTR_MSG_ID]: msgId,
 			[ATTR_FLOW_ID]: nodeDefinition.z,
 			[ATTR_NODE_ID]: nodeDefinition.id,
@@ -471,13 +636,15 @@ function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
 		// handle context
 		if (msgSpans.has(msgId)) {
 			// get (parent) message context
-			ctx = trace.setSpan(context.active(), msgSpans.get(msgId).parentSpan);
+			if (existingParent) {
+				ctx = trace.setSpan(context.active(), existingParent.parentSpan);
+			}
 		} else {
 			if (nodeDefinition.type === "http in") {
 				// try to get trace context in incoming http request headers
 				ctx = propagator.extract(
 					context.active(),
-					msg.req.headers,
+					msg.req?.headers ?? {},
 					defaultTextMapGetter,
 				);
 			} else if (nodeDefinition.type === "mqtt in" && msg.userProperties) {
@@ -491,7 +658,7 @@ function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
 				// try to get trace context in incoming ampq message headers
 				ctx = propagator.extract(
 					context.active(),
-					msg.properties.headers,
+					msg.properties?.headers ?? {},
 					defaultTextMapGetter,
 				);
 			}
@@ -524,7 +691,7 @@ function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
 
 		if (isNotTraced) {
 			// store fake child span (required to finish parent span)
-			msgSpans.get(msgId).spans.set(
+			msgSpans.get(msgId)?.spans.set(
 				spanId,
 				Object.assign(
 					{
@@ -532,9 +699,9 @@ function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
 						_creationTimestamp: now,
 					},
 					fakeSpan,
-				),
+				) as unknown as Span,
 			);
-			return fakeSpan;
+			return fakeSpan as unknown as Span;
 		}
 		// create child span
 		const localAttributes = parseAttribute(
@@ -560,29 +727,35 @@ function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
 				kind,
 			},
 			ctx,
-		);
+		) as Span & { _creationTimestamp: number };
 		span._creationTimestamp = now;
 
 		if (nodeDefinition.type === "http in") {
 			msg.otelStartTime = now;
-			const httpAttributes = {
+			const httpAttributes: Record<string, string | undefined> = {
 				[ATTR_URL_PATH]: nodeDefinition.url,
 				[ATTR_HTTP_REQUEST_METHOD]: nodeDefinition.method?.toUpperCase(),
-				[ATTR_CLIENT_ADDRESS]: msg.req.ip,
+				[ATTR_CLIENT_ADDRESS]: msg.req?.ip,
 				[ATTR_HTTP_REQUEST_HEADER("x-forwarded-for")]:
-					msg.req.headers["x-forwarded-for"],
-				[ATTR_USER_AGENT_ORIGINAL]: msg.req.headers["user-agent"],
+					msg.req?.headers?.["x-forwarded-for"],
+				[ATTR_USER_AGENT_ORIGINAL]: msg.req?.headers?.["user-agent"],
 			};
 			span.setAttributes(httpAttributes);
 			if (parentSpan !== undefined) {
 				parentSpan.setAttributes(httpAttributes);
-				parentSpan.updateName(`${parentSpan.name} ${nodeDefinition.url}`);
+				const parentSpanExt = parentSpan as Span & OTelSpanExtension;
+				parentSpanExt.updateName?.(
+					`${parentSpanExt.name ?? ""} ${nodeDefinition.url ?? ""}`,
+				);
 			}
 		}
 		if (nodeDefinition.type === "websocket out") {
 			// add URL info in attributes
 			try {
-				const url = URL.parse(nodeDefinition.serverConfig.path);
+				if (!nodeDefinition.serverConfig?.path) {
+					return span;
+				}
+				const url = new URL(nodeDefinition.serverConfig.path);
 				span.setAttribute(ATTR_URL_PATH, url.pathname);
 				span.setAttribute(ATTR_SERVER_ADDRESS, url.hostname);
 				span.setAttribute(ATTR_SERVER_PORT, url.port);
@@ -592,14 +765,18 @@ function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
 
 		if (nodeDefinition.type === "websocket in") {
 			// add URL info in attributes
+			if (!nodeDefinition.serverConfig?.path) {
+				return span;
+			}
 			span.setAttribute(ATTR_URL_PATH, nodeDefinition.serverConfig.path);
 			if (parentSpan !== undefined) {
 				parentSpan.setAttribute(
 					ATTR_URL_PATH,
 					nodeDefinition.serverConfig.path,
 				);
-				parentSpan.updateName(
-					`${parentSpan.name} ${nodeDefinition.serverConfig.path}`,
+				const parentSpanExt = parentSpan as Span & OTelSpanExtension;
+				parentSpanExt.updateName?.(
+					`${parentSpanExt.name ?? ""} ${nodeDefinition.serverConfig.path}`,
 				);
 			}
 		}
@@ -610,8 +787,10 @@ function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
 
 		// store child span
 		const parent = msgSpans.get(msgId);
-		parent.spans.set(spanId, span);
-		parent.updateTimestamp = now;
+		parent?.spans.set(spanId, span);
+		if (parent) {
+			parent.updateTimestamp = now;
+		}
 		return span;
 	} catch (error) {
 		console.error(`An error occurred during span creation`, error);
@@ -620,12 +799,17 @@ function createSpan(RED, tracer, msg, nodeDefinition, node, isNotTraced) {
 
 /**
  * Ends the span for this node and message
- * @param {any} RED Node-RED runtime object
- * @param {any} msg Complete message data
- * @param {any} error Any error encountered
- * @param {any} nodeDefinition Current node definition
+ * @param {RuntimeApi} RED Node-RED runtime object
+ * @param {RuntimeMessage} msg Complete message data
+ * @param {unknown} error Any error encountered
+ * @param {NodeDef} nodeDefinition Current node definition
  */
-function endSpan(RED, msg, error, nodeDefinition) {
+function endSpan(
+	RED: RuntimeApi,
+	msg: RuntimeMessage,
+	error: unknown,
+	nodeDefinition: RuntimeNodeDef,
+): void {
 	try {
 		// check and get message id (handle root message id for splitted parts)
 		const msgId = getMsgId(msg);
@@ -634,43 +818,58 @@ function endSpan(RED, msg, error, nodeDefinition) {
 		}
 		// check and get span id (msg id and node id)
 		const msgSpanId = getSpanId(msg, nodeDefinition);
-		if (!msgSpans.has(msgId) || !msgSpans.get(msgId).spans.has(msgSpanId)) {
+		if (!msgSpans.has(msgId) || !msgSpans.get(msgId)?.spans.has(msgSpanId)) {
 			return;
 		}
 
 		// end and remove child span
 		const parent = msgSpans.get(msgId);
-		const span = parent.spans.get(msgSpanId);
+		if (!parent) {
+			return;
+		}
+		const span = parent?.spans.get(msgSpanId);
 		const flowName = getFlowName(RED, nodeDefinition.z);
 		if (flowName) {
-			span.setAttribute(ATTR_FLOW_NAME, flowName);
+			span?.setAttribute(ATTR_FLOW_NAME, flowName);
 		}
 		if (nodeDefinition.type === "http request") {
 			// add http status code in attribute
-			span.setAttribute(ATTR_HTTP_RESPONSE_STATUS_CODE, msg.statusCode);
-			if (msg.statusCode >= 400) {
-				span.setStatus({ code: SpanStatusCode.ERROR });
-			} else if (msg.statusCode >= 200 && msg.statusCode < 300) {
-				span.setStatus({ code: SpanStatusCode.OK });
+			const statusCode = msg.statusCode;
+			if (typeof statusCode === "number") {
+				span?.setAttribute(ATTR_HTTP_RESPONSE_STATUS_CODE, statusCode);
+			}
+			if (typeof statusCode === "number" && statusCode >= 400) {
+				span?.setStatus({ code: SpanStatusCode.ERROR });
+			} else if (
+				typeof statusCode === "number" &&
+				statusCode >= 200 &&
+				statusCode < 300
+			) {
+				span?.setStatus({ code: SpanStatusCode.OK });
 			}
 			// add URL info in attributes
-			try {
-				const url = URL.parse(msg.responseUrl);
-				span.setAttribute(ATTR_URL_PATH, url.pathname);
-				span.setAttribute(ATTR_SERVER_ADDRESS, url.hostname);
-				span.setAttribute(ATTR_SERVER_PORT, url.port);
-				span.setAttribute(ATTR_URL_SCHEME, url.protocol.replace(":", ""));
-			} catch (_error) {}
+			if (msg.responseUrl) {
+				try {
+					const url = new URL(msg.responseUrl);
+					span?.setAttribute(ATTR_URL_PATH, url.pathname);
+					span?.setAttribute(ATTR_SERVER_ADDRESS, url.hostname);
+					span?.setAttribute(ATTR_SERVER_PORT, url.port);
+					span?.setAttribute(ATTR_URL_SCHEME, url.protocol.replace(":", ""));
+				} catch (_error) {}
+			}
 		}
 		if (error) {
 			// log errors
 			if (msg.error) {
-				span.recordException(msg.error);
+				span?.recordException(msg.error);
 			} else {
-				span.recordException(error);
+				span?.recordException(error);
 			}
-			span.setStatus({ code: SpanStatusCode.ERROR, message: error });
-			if (parent.parentSpan) {
+			span?.setStatus({
+				code: SpanStatusCode.ERROR,
+				message: error instanceof Error ? error.message : String(error),
+			});
+			if (parent?.parentSpan) {
 				parent.parentSpan.setStatus({ code: SpanStatusCode.ERROR });
 			}
 		}
@@ -682,7 +881,7 @@ function endSpan(RED, msg, error, nodeDefinition) {
 		);
 		if (localAttributes !== undefined) {
 			for (const [key, value] of Object.entries(localAttributes)) {
-				span.setAttribute(key, value);
+				span?.setAttribute(key, value);
 			}
 			if (sharedState.isLogging) {
 				console.log(
@@ -693,14 +892,14 @@ function endSpan(RED, msg, error, nodeDefinition) {
 
 		if (nodeDefinition.type === "http response") {
 			// correlate with "http in" node
-			const statusCode = msg.res._res.statusCode;
+			const statusCode = msg.res?._res?.statusCode;
 			for (const [msgSpanId, spanIn] of parent.spans) {
 				if (spanIn.attributes["node_red.node.type"] === "http in") {
 					if (sharedState.isLogging) {
 						console.log("==> Ended related span for ", msgSpanId, "http in");
 					}
 					spanIn.end();
-					parent.spans.delete(msgSpanId);
+					parent?.spans.delete(msgSpanId);
 					break;
 				}
 			}
@@ -709,29 +908,36 @@ function endSpan(RED, msg, error, nodeDefinition) {
 			if (sharedState.metrics.requestDuration && msg.otelStartTime) {
 				const duration = Date.now() - msg.otelStartTime;
 				sharedState.metrics.requestDuration.record(duration, {
-					[ATTR_HTTP_RESPONSE_STATUS_CODE]: statusCode,
-					[ATTR_HTTP_REQUEST_METHOD]: msg.req.method,
-					[ATTR_URL_PATH]: msg.req.path,
+					[ATTR_HTTP_RESPONSE_STATUS_CODE]: statusCode ?? 0,
+					[ATTR_HTTP_REQUEST_METHOD]: msg.req?.method ?? "",
+					[ATTR_URL_PATH]: msg.req?.path ?? "",
 				});
 			}
 
 			// add http status code in attribute
-			if (statusCode >= 400) {
-				span.setStatus({ code: SpanStatusCode.ERROR });
-				parent.parentSpan.setStatus({ code: SpanStatusCode.ERROR });
-			} else if (statusCode >= 200 && statusCode < 300) {
-				span.setStatus({ code: SpanStatusCode.OK });
-				parent.parentSpan.setStatus({ code: SpanStatusCode.OK });
+			if (typeof statusCode === "number" && statusCode >= 400) {
+				span?.setStatus({ code: SpanStatusCode.ERROR });
+				parent?.parentSpan.setStatus({ code: SpanStatusCode.ERROR });
+			} else if (
+				typeof statusCode === "number" &&
+				statusCode >= 200 &&
+				statusCode < 300
+			) {
+				span?.setStatus({ code: SpanStatusCode.OK });
+				parent?.parentSpan.setStatus({ code: SpanStatusCode.OK });
 			}
-			span.setAttribute(ATTR_HTTP_RESPONSE_STATUS_CODE, statusCode);
-			parent.parentSpan.setAttribute(
-				ATTR_HTTP_RESPONSE_STATUS_CODE,
-				statusCode,
-			);
+			if (typeof statusCode === "number") {
+				span?.setAttribute(ATTR_HTTP_RESPONSE_STATUS_CODE, statusCode);
+				parent?.parentSpan.setAttribute(
+					ATTR_HTTP_RESPONSE_STATUS_CODE,
+					statusCode,
+				);
+			}
 		}
 
-		span.end();
-		const currentSpanCreationTimestamp = span._creationTimestamp;
+		span?.end();
+		const currentSpanCreationTimestamp = (span as Span & OTelSpanExtension)
+			?._creationTimestamp;
 		if (sharedState.isLogging) {
 			console.log(
 				"==> Ended span for ",
@@ -739,15 +945,18 @@ function endSpan(RED, msg, error, nodeDefinition) {
 				nodeDefinition.type,
 			);
 		}
-		parent.spans.delete(msgSpanId);
+		parent?.spans.delete(msgSpanId);
 		parent.updateTimestamp = Date.now();
 
 		// check orphan traces (nodes that do not trigger complete event)
 		let isOrphan = true;
 		for (const [, span] of parent.spans) {
 			if (
-				!ORPHAN_NODE_TYPES.includes(span.attributes["node_red.node.type"]) ||
-				span._creationTimestamp > currentSpanCreationTimestamp
+				!ORPHAN_NODE_TYPES.includes(
+					span.attributes["node_red.node.type"] as string,
+				) ||
+				((span as Span & OTelSpanExtension)._creationTimestamp ?? 0) >
+					(currentSpanCreationTimestamp ?? 0)
 			) {
 				// found an active span, skip
 				isOrphan = false;
@@ -759,15 +968,15 @@ function endSpan(RED, msg, error, nodeDefinition) {
 				if (sharedState.isLogging) {
 					console.log(`Orphan span to delete: ${msgSpanId}`);
 				}
-				parent.spans.delete(msgSpanId);
+				parent?.spans.delete(msgSpanId);
 			}
 			// all children are completed, end and remove parent span
 			if (sharedState.isLogging) {
 				console.log(
-					`Parent span "${parent.parentSpan.name}" no longer has child span, ending`,
+					`Parent span "${parent?.parentSpan.name}" no longer has child span, ending`,
 				);
 			}
-			parent.parentSpan.end();
+			parent?.parentSpan.end();
 			msgSpans.delete(msgId);
 		}
 	} catch (error) {
@@ -776,16 +985,14 @@ function endSpan(RED, msg, error, nodeDefinition) {
 }
 
 /**
- * @param {any} RED Node-RED runtime object
+ * @param {RuntimeApi} RED Node-RED runtime object
  */
-module.exports = function (RED) {
-	"use strict";
-
+module.exports = (RED: RuntimeApi) => {
 	/**
 	 * Initialize the OpenTelemetry system. Can be called by the Plugin API or a Node instance.
-	 * @param {any} config Optional configuration to override defaults
+	 * @param {OTELConfig} config Optional configuration to override defaults
 	 */
-	function initOTEL(config = {}) {
+	function initOTEL(config: OTELConfig = {}): void {
 		// get config
 		const resolvedConfig = resolveOpenTelemetryConfig(config);
 		const {
@@ -809,7 +1016,8 @@ module.exports = function (RED) {
 		sharedState.isLogging = Boolean(isLogging);
 		sharedState.rootPrefix = rootPrefix;
 		sharedState.timeout = normalizeTimeoutMs(timeout);
-		sharedState.attributeMappings = sanitizeAttributeMappings(attributeMappings);
+		sharedState.attributeMappings =
+			sanitizeAttributeMappings(attributeMappings);
 		sharedState.ignoredTypesList = splitCsv(ignoredTypes);
 		sharedState.propagateHeadersTypesList = splitCsv(propagateHeadersTypes);
 
@@ -820,7 +1028,7 @@ module.exports = function (RED) {
 
 		// create tracer if not already created
 		if (!sharedState.provider && tracesEnabled && url) {
-			let spanProcessor;
+			let spanProcessor: BatchSpanProcessor;
 			if (protocol === "proto") {
 				const {
 					OTLPTraceExporter,
@@ -885,7 +1093,7 @@ module.exports = function (RED) {
 
 		// add hooks only for the first instance
 		if (sharedState.refCount === 0) {
-			RED.hooks.add("onSend.otel", (events) => {
+			RED.hooks.add("onSend.otel", (events: RuntimeHookEvent[]) => {
 				if (events.length === 0) {
 					return;
 				}
@@ -896,32 +1104,38 @@ module.exports = function (RED) {
 							RED,
 							sharedState.tracer,
 							event.msg,
-							event.source.node,
+							event.source?.node as RuntimeNodeDef,
 							null,
-							sharedState.ignoredTypesList.includes(event.source.node.type),
+							sharedState.ignoredTypesList.includes(
+								event.source?.node.type ?? "",
+							),
 						);
 					}
 				});
 			});
 
-			RED.hooks.add("preDeliver.otel", (sendEvent) => {
+			RED.hooks.add("preDeliver.otel", (sendEvent: RuntimeHookEvent) => {
 				if (
-					sharedState.propagateHeadersTypesList.includes(sendEvent.source.node.type)
+					sendEvent.source?.node &&
+					sharedState.propagateHeadersTypesList.includes(
+						sendEvent.source.node.type,
+					)
 				) {
 					if (!sendEvent.msg.headers) {
 						sendEvent.msg.headers = {};
 					}
+					const headers = sendEvent.msg.headers;
 					// remove trace context of http request headers
-					propagator.fields().forEach((field) => {
-						delete sendEvent.msg.headers[field];
+					propagator.fields().forEach((field: string) => {
+						delete headers[field];
 					});
 				}
 				logEvent(RED, null, "3.preDeliver", sendEvent);
 			});
 
-			RED.hooks.add("postDeliver.otel", (sendEvent) => {
+			RED.hooks.add("postDeliver.otel", (sendEvent: RuntimeHookEvent) => {
 				logEvent(RED, null, "4.postDeliver", sendEvent);
-				if (!sharedState.tracer) return;
+				if (!sharedState.tracer || !sendEvent.destination?.node) return;
 
 				const span = createSpan(
 					RED,
@@ -929,15 +1143,19 @@ module.exports = function (RED) {
 					sendEvent.msg,
 					sendEvent.destination.node,
 					null,
-					sharedState.ignoredTypesList.includes(sendEvent.destination.node.type),
+					sharedState.ignoredTypesList.includes(
+						sendEvent.destination.node.type,
+					),
 				);
 				if (
+					span &&
+					sendEvent.destination.node &&
 					sharedState.propagateHeadersTypesList.includes(
 						sendEvent.destination.node.type,
 					)
 				) {
-					const output = {};
-					const ctx = trace.setSpan(context.active(), span);
+					const output: Record<string, string> = {};
+					const ctx = trace.setSpan(context.active(), span as Span);
 					propagator.inject(ctx, output, defaultTextMapSetter);
 					switch (sendEvent.destination.node.type) {
 						// add trace context in mqtt v5 user properties
@@ -957,39 +1175,50 @@ module.exports = function (RED) {
 					}
 				}
 				if (
-					sendEvent.source.node.type === "switch" ||
-					sendEvent.source.node.type.startsWith("subflow")
+					sendEvent.source?.node &&
+					(sendEvent.source.node.type === "switch" ||
+						sendEvent.source.node.type.startsWith("subflow"))
 				) {
 					// end switch or subflow spans as they do not trigger onComplete
 					const msgId = getMsgId(sendEvent.msg);
 					const spanId = getSpanId(sendEvent.msg, sendEvent.source.node);
 					const parent = msgSpans.get(msgId);
-					if (parent && parent.spans.has(spanId)) {
+					if (parent?.spans.has(spanId)) {
 						if (sharedState.isLogging) {
 							console.log(`Switch or subflow span ${spanId} will be ended`);
 						}
-						parent.spans.get(spanId).end();
+						parent.spans.get(spanId)?.end();
 						parent.spans.delete(spanId);
 					}
 				}
 			});
 
-			RED.hooks.add("postReceive.otel", (sendEvent) => {
+			RED.hooks.add("postReceive.otel", (sendEvent: RuntimeHookEvent) => {
 				logEvent(RED, null, "6.postReceive", sendEvent);
 			});
 
-			RED.hooks.add("onReceive.otel", (receiveEvent) => {
-				if (receiveEvent.destination.node.type === "split") {
+			RED.hooks.add("onReceive.otel", (receiveEvent: RuntimeHookEvent) => {
+				if (receiveEvent.destination?.node.type === "split") {
 					// store parent message id before split
 					receiveEvent.msg.otelRootMsgId = getMsgId(receiveEvent.msg);
 				}
 				logEvent(RED, null, "5.onReceive", receiveEvent);
 			});
 
-			RED.hooks.add("onComplete.otel", (completeEvent) => {
-				logEvent(RED, null, "7.onComplete", completeEvent);
-				endSpan(RED, completeEvent.msg, completeEvent.error, completeEvent.node.node);
-			});
+			RED.hooks.add(
+				"onComplete.otel",
+				(
+					completeEvent: RuntimeHookEvent & { node: { node: RuntimeNodeDef } },
+				) => {
+					logEvent(RED, null, "7.onComplete", completeEvent);
+					endSpan(
+						RED,
+						completeEvent.msg,
+						completeEvent.error,
+						completeEvent.node.node,
+					);
+				},
+			);
 
 			// add timer for killing outdated message spans
 			sharedState.intervalId = setInterval(deleteOutdatedMsgSpans, 5000);
@@ -998,7 +1227,7 @@ module.exports = function (RED) {
 		sharedState.refCount++;
 	}
 
-	async function stopOTEL() {
+	async function stopOTEL(): Promise<void> {
 		sharedState.refCount--;
 		if (sharedState.refCount <= 0) {
 			if (sharedState.intervalId) {
@@ -1030,10 +1259,10 @@ module.exports = function (RED) {
 	}
 
 	// Register as a Node
-	function OpenTelemetryNode(config) {
+	function OpenTelemetryNode(this: RedNodeInstance, config: OTELNodeDef) {
 		RED.nodes.createNode(this, config);
 		initOTEL(config);
-		this.on("close", async (done) => {
+		this.on("close", async (done: () => void) => {
 			await stopOTEL();
 			this.status({ fill: "red", shape: "ring", text: "deactivated" });
 			if (typeof done === "function") done();
@@ -1047,10 +1276,15 @@ module.exports = function (RED) {
 	if (RED.plugins && typeof RED.plugins.registerRuntimePlugin === "function") {
 		RED.plugins.registerRuntimePlugin({
 			id: "opentelemetry-runtime",
-			onSettings: (settings) => {
+			onSettings: (settings: unknown) => {
 				// We can read from settings.js if needed
-				if (settings.opentelemetry) {
-					initOTEL(settings.opentelemetry);
+				if (
+					typeof settings === "object" &&
+					settings !== null &&
+					"opentelemetry" in settings
+				) {
+					const pluginSettings = settings as { opentelemetry?: OTELConfig };
+					initOTEL(pluginSettings.opentelemetry ?? {});
 				} else {
 					// Fallback to env vars only
 					initOTEL({});
@@ -1071,13 +1305,13 @@ module.exports.__test__ = {
 	createSpan,
 	endSpan,
 	deleteOutdatedMsgSpans,
-	setAttributeMappings: (mappings) => {
+	setAttributeMappings: (mappings: unknown) => {
 		sharedState.attributeMappings = sanitizeAttributeMappings(mappings);
 	},
-	setTimeout: (timeoutMs) => {
+	setTimeout: (timeoutMs: number) => {
 		sharedState.timeout = timeoutMs;
 	},
-	setLogging: (value) => {
+	setLogging: (value: boolean) => {
 		sharedState.isLogging = value;
 	},
 	resolveOpenTelemetryConfig,

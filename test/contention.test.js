@@ -1,4 +1,4 @@
-const Module = require("module");
+const Module = require("node:module");
 const path = require("node:path");
 
 const stubPath = path.join(__dirname, "stubs", "node-red-util.cjs");
@@ -12,7 +12,7 @@ Module._resolveFilename = function (request, parent, isMain, options) {
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const otelModule = require("../lib/opentelemetry-node");
+const otelModule = require("../dist/opentelemetry-node");
 Module._resolveFilename = originalResolveFilename;
 
 test("OpenTelemetry node contention: nodes share state and hooks are reference counted", async () => {
@@ -27,8 +27,8 @@ test("OpenTelemetry node contention: nodes share state and hooks are reference c
 			createNode: (node, config) => {
 				Object.assign(node, config);
 			},
-			registerType: (name, constructor) => {
-				mockRed.nodes[name] = constructor;
+			registerType: (name, nodeCtor) => {
+				mockRed.nodes[name] = nodeCtor;
 			},
 		},
 		hooks: {
@@ -45,7 +45,7 @@ test("OpenTelemetry node contention: nodes share state and hooks are reference c
 	};
 
 	otelModule(mockRed);
-	const OpenTelemetry = mockRed.nodes["OpenTelemetry"];
+	const OpenTelemetry = mockRed.nodes.OpenTelemetry;
 
 	let close1, close2;
 	const node1 = {
