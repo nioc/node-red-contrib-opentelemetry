@@ -1,15 +1,15 @@
 <!--  OpenTelemetry node -->
 <style>
   .node-input-otelAttributeMapping {
-    flex-grow: 1 !important;
-  }
-  .node-input-otelAttributeMapping input {
-    width: calc(25% - 5px) !important;
-    margin-left: 5px !important;
-  }
-  .node-input-otelAttributeMapping-isAfterProcess {
-    width: 60px !important;
-  }
+      flex-grow: 1;
+    }
+    .node-input-otelAttributeMapping input {
+      width: calc(25% - 5px);
+      margin-left: 5px;
+    }
+    .node-input-otelAttributeMapping-isAfterProcess {
+      width: 60px;
+    }
 </style>
 <script type="text/javascript">
 function sortAttributeMappings (a, b) {
@@ -33,11 +33,11 @@ RED.nodes.registerType('OpenTelemetry', {
     url: {
       value: 'http://localhost:4318/v1/traces',
       required: true,
-      validate: function (v) {
+      validate: (v) => {
         try {
           new URL(v)
           return true
-        } catch (err) {
+        } catch (_err) {
           return false
         }
       },
@@ -85,7 +85,7 @@ RED.nodes.registerType('OpenTelemetry', {
     },
     attributeMappings: {
       value: [],
-      validate: function (attributeMappings) {
+      validate: (attributeMappings) => {
         if (!attributeMappings || attributeMappings.length === 0) {
           return true
         }
@@ -111,8 +111,8 @@ RED.nodes.registerType('OpenTelemetry', {
   },
   oneditprepare: function () {
     $('#node-input-otelAttributeMapping-container').css('min-height', '150px').css('min-width', '450px').editableList({
-      addItem: function (container, i, opt) {
-        if (!Object.prototype.hasOwnProperty.call(opt, 'attributeMapping')) {
+      addItem: (container, _i, opt) => {
+        if (!Object.hasOwn(opt, 'attributeMapping')) {
           opt.attributeMapping = {
             isAfter: false,
             flow: '',
