@@ -1,23 +1,60 @@
 [
-	{
-		"id": "1dc4c3fe2e38934c",
-		"type": "tab",
-		"label": "Prometheus exporter",
-		"disabled": false,
-		"info": "This is an example of a flow for the Prometheus node.",
-		"env": []
-	},
-	{
-		"id": "9a4cbf20508e704a",
-		"type": "Prometheus Exporter",
-		"z": "1dc4c3fe2e38934c",
-		"name": "Prometheus",
-		"endpoint": "/metrics",
-		"port": 1881,
-		"serviceName": "Node-RED",
-		"instrumentName": "http_request_duration",
-		"x": 330,
-		"y": 140,
-		"wires": []
-	}
+    {
+        "id": "metrics_tab",
+        "type": "tab",
+        "label": "Prometheus Example",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "9a4cbf20508e704a",
+        "type": "Prometheus Exporter",
+        "z": "metrics_tab",
+        "name": "Prometheus Config",
+        "endpoint": "/metrics",
+        "port": 1881,
+        "serviceName": "Node-RED-Metrics",
+        "instrumentName": "http_request_duration",
+        "x": 160,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "h1",
+        "type": "http in",
+        "z": "metrics_tab",
+        "name": "API Endpoint",
+        "url": "/api/test",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 130,
+        "y": 180,
+        "wires": [
+            [
+                "h2"
+            ]
+        ]
+    },
+    {
+        "id": "h2",
+        "type": "http response",
+        "z": "metrics_tab",
+        "name": "Success Response",
+        "statusCode": "200",
+        "headers": {},
+        "x": 350,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "info",
+        "type": "comment",
+        "z": "metrics_tab",
+        "name": "README",
+        "info": "To see metrics:\n1. Ensure settings.js is updated with prometheusMiddleware.\n2. Deploy this flow.\n3. Call GET http://localhost:1880/api/test\n4. View metrics at http://localhost:1881/metrics",
+        "x": 120,
+        "y": 240,
+        "wires": []
+    }
 ]

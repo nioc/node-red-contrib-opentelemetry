@@ -1,43 +1,35 @@
 # Node-RED OpenTelemetry
 
 [![license: LGPLv3](https://img.shields.io/badge/license-LGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
-[![GitHub release](https://img.shields.io/github/release/nioc/node-red-contrib-opentelemetry.svg)](https://github.com/nioc/node-red-contrib-opentelemetry/releases/latest)
-[![GitHub Lint Workflow Status](https://img.shields.io/github/actions/workflow/status/nioc/node-red-contrib-opentelemetry/commit.yml?label=lint)](https://github.com/nioc/node-red-contrib-opentelemetry/actions/workflows/commit.yml)
-[![GitHub Publish Workflow Status](https://img.shields.io/github/actions/workflow/status/nioc/node-red-contrib-opentelemetry/publish.yml?label=publish)](https://github.com/nioc/node-red-contrib-opentelemetry/actions/workflows/publish.yml)
-[![npm](https://img.shields.io/npm/dt/node-red-contrib-opentelemetry)](https://www.npmjs.com/package/node-red-contrib-opentelemetry)
+[![GitHub release](https://img.shields.io/github/release/frankvdb7/node-red-contrib-opentelemetry.svg)](https://github.com/frankvdb7/node-red-contrib-opentelemetry/releases/latest)
+[![GitHub Lint Workflow Status](https://img.shields.io/github/actions/workflow/status/frankvdb7/node-red-contrib-opentelemetry/nodejs.yml?label=lint)](https://github.com/frankvdb7/node-red-contrib-opentelemetry/actions/workflows/nodejs.yml)
+[![GitHub Publish Workflow Status](https://img.shields.io/github/actions/workflow/status/frankvdb7/node-red-contrib-opentelemetry/publish-npmjs.yml?label=publish)](https://github.com/frankvdb7/node-red-contrib-opentelemetry/actions/workflows/publish-npmjs.yml)
+[![npm](https://img.shields.io/npm/dt/@frankvdb/node-red-contrib-opentelemetry)](https://www.npmjs.com/package/@frankvdb/node-red-contrib-opentelemetry)
 
-Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for Node-RED
+Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for Node-RED.
 
-## Key features
+## Key Features
 
 ### Traces
 
-- based on [OpenTelemetry JavaScript framework](https://github.com/open-telemetry/opentelemetry-js) and [Node-RED messaging hooks](https://nodered.org/docs/api/hooks/messaging):
-  - create spans on `onSend(source)` and `postDeliver(destination)` events,
-  - end spans on `onComplete` and `postDeliver(source)` events.
-- trace includes:
-  - message id,
-  - flow id,
-  - node id,
-  - node type,
-  - node name (if filled),
-  - hostname,
-  - optional `http status code` (for request node type),
-  - optional `exception`,
-  - optional custom attributes based on message data.
+- Powered by the [OpenTelemetry JavaScript framework](https://github.com/open-telemetry/opentelemetry-js) and [Node-RED messaging hooks](https://nodered.org/docs/api/hooks/messaging):
+  - Automatically creates spans on `onSend(source)` and `postDeliver(destination)` events.
+  - Automatically ends spans on `onComplete` and `postDeliver(source)` events.
+- Each trace includes:
+  - Message ID, Flow ID, Node ID, Node Type, Node Name (if provided).
+  - Hostname.
+  - Optional `http status code` (for request nodes).
+  - Optional exception details.
+  - Optional custom attributes based on message data (using JMESPath).
 
-![Example spans in JaegerUI](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_01.png "Example spans")
+![Example spans in JaegerUI](docs/Screenshot_01.png "Example spans")
 
-![Example spans to metrics in Grafana](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_02.png "Example spans to metrics")
+![Example spans to metrics in Grafana](docs/Screenshot_02.png "Example spans to metrics")
 
 ### Metrics
 
-- export of request metrics from `http in` nodes (for Prometheus scraping):
-  - method,
-  - route,
-  - status,
-  - ip
-  - duration.
+- Exports HTTP request metrics from `http in` nodes (ready for Prometheus scraping):
+  - `method`, `route`, `status`, `ip`, `duration`.
 
 ``` bash
 curl http://localhost:1881/metrics
@@ -49,71 +41,77 @@ target_info{service_name="Node-RED",telemetry_sdk_language="nodejs",telemetry_sd
 # TYPE http_request_duration histogram
 http_request_duration_count{method="POST",route="/api/test",status="201",ip="127.0.0.1"} 5
 http_request_duration_sum{method="POST",route="/api/test",status="201",ip="127.0.0.1"} 620
-http_request_duration_bucket{method="POST",route="/api/test",status="201",ip="127.0.0.1",le="0"} 0
-http_request_duration_bucket{method="POST",route="/api/test",status="201",ip="127.0.0.1",le="25"} 0
-http_request_duration_bucket{method="POST",route="/api/test",status="201",ip="127.0.0.1",le="50"} 4
-http_request_duration_bucket{method="POST",route="/api/test",status="201",ip="127.0.0.1",le="75"} 4
-http_request_duration_bucket{method="POST",route="/api/test",status="201",ip="127.0.0.1",le="100"} 4
-http_request_duration_bucket{method="POST",route="/api/test",status="201",ip="127.0.0.1",le="250"} 4
-http_request_duration_bucket{method="POST",route="/api/test",status="201",ip="127.0.0.1",le="500"} 4
-http_request_duration_bucket{method="POST",route="/api/test",status="201",ip="127.0.0.1",le="1000"} 5
-http_request_duration_bucket{method="POST",route="/api/test",status="201",ip="127.0.0.1",le="2000"} 5
-http_request_duration_bucket{method="POST",route="/api/test",status="201",ip="127.0.0.1",le="+Inf"} 5
+...
 ```
 
 ## Installation
 
-Search `node-red-contrib-opentelemetry` within the palette manager or install with npm from the command-line (within your user data directory):
+**Requirement**: Node.js >= 22.0.0
+
+Search for
+ `@frankvdb/node-red-contrib-opentelemetry` in the Node-RED Palette Manager or install via npm:
+
 ``` bash
-npm install node-red-contrib-opentelemetry
+npm install @frankvdb/node-red-contrib-opentelemetry
 ```
 
-As with every [node installation](https://nodered.org/docs/user-guide/runtime/adding-nodes), you will need to restart Node-RED for it to pick-up the new nodes.
+Restart Node-RED after installation to pick up the new nodes.
 
 ## Usage
 
 ### Traces
 
-- Add OTEL node **once** (to any flow),
-- Setup the node:
-  - set OTEL [exporter](https://opentelemetry.io/docs/instrumentation/js/exporters/) url (example for Jaeger: `http://localhost:4318/v1/traces`),
-  - choose an OTLP transport protocol (`http/json` or `http/protobuf`),
-  - define a service name (will be displayed as span service),
-  - define an optional root span prefix (will be added in Node-RED root span name),
-  - define nodes that should not send traces (using comma-separated list like `debug,catch`),
-  - define nodes that should propagate [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview) (in http request headers, using comma-separated list like `http request,my-custom-node`),
-  - define time in seconds after which an unmodified message will be ended and deleted,
-  - define custom attributes you want to send (optionally).
+1.  Add the **OTEL** node **once** to any flow.
+2.  Configure the node:
+    -   **Exporter URL**: Set your OTLP exporter endpoint (e.g., `http://localhost:4318/v1/traces` for Jaeger).
+    -   **Protocol**: Choose `http/json` or `http/protobuf`.
+    -   **Service Name**: The name displayed in your tracing backend.
+    -   **Root Prefix**: Optional prefix for the root span name.
+    -   **Ignored Types**: Comma-separated list of node types to exclude from tracing (e.g., `debug,catch`).
+    -   **Propagate**: Comma-separated list of node types that should propagate [W3C trace context](https://www.w3.org/TR/trace-context/) (e.g., `http request`).
+    -   **Timeout**: Seconds after which an unmodified message span will be closed.
+    -   **Span Attribute Mappings**: Define custom attributes using [JMESPath](https://jmespath.org/) syntax to extract data from the `msg` object.
 
-OpenTelemetry environment variables are also supported:
-- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (or `OTEL_EXPORTER_OTLP_ENDPOINT` as fallback) for exporter URL,
-- `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` (or `OTEL_EXPORTER_OTLP_PROTOCOL`) for protocol (`http/json` or `http/protobuf`),
-- `OTEL_SERVICE_NAME` for service name.
+#### Environment Variables
+You can also use standard OpenTelemetry environment variables:
+- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (or `OTEL_EXPORTER_OTLP_ENDPOINT`)
+- `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` (or `OTEL_EXPORTER_OTLP_PROTOCOL`)
+- `OTEL_SERVICE_NAME`
 
-Environment values are used when the node keeps its default values for URL/protocol/service name. Explicit node settings still win.
+Environment variables are used only if the corresponding node fields are left at their default values.
 
 ### Metrics
 
-- Add Prometheus node **once** (to any flow),
-- Setup the node:
-  - set Prometheus export port and endpoint (example: `1881` and `/metrics`),
-  - define a service name (will be displayed in export),
-  - define a instrument name (will be displayed in export),
-- Add middleware to your `settings.js` file:
-  ``` js
-    // import the prometheus middleware
-    const { prometheusMiddleware } = require('node-red-contrib-opentelemetry/lib/prometheus-exporter.js')
+1.  Add the **Prometheus Exporter** node **once** to any flow.
+2.  Configure the node:
+    -   **Port**: The port where the metrics server will listen (e.g., `1881`).
+    -   **Endpoint**: The scraping path (e.g., `/metrics`).
+    -   **Service Name**: Displayed in the exported metrics.
+3.  **Critical Step**: Enable the middleware in your `settings.js` file (typically found in `~/.node-red/settings.js`):
+
+``` js
+// 1. Import the prometheus middleware at the top of settings.js
+const { prometheusMiddleware } = require('@frankvdb/node-red-contrib-opentelemetry/lib/prometheus-exporter.js');
+
+module.exports = {
     // ...
-    // then add it to the existing httpNodeMiddleware attribute
+    // 2. Add it to the httpNodeMiddleware property
     httpNodeMiddleware: prometheusMiddleware,
     // ...
-  ```
+}
+```
+
+## Examples
+
+Example flows are provided in the [examples/](examples/) directory:
+- [OpenTelemetry.json](examples/OpenTelemetry.json): A complete tracing demonstration flow.
+- [Prometheus.json](examples/Prometheus.json): An HTTP endpoint demonstration flow with metrics.
+
+You can import these into Node-RED using **Import** from the main menu (Ctrl-I).
 
 ## Versioning
 
-node-red-contrib-opentelemetry is maintained under the [semantic versioning](https://semver.org/) guidelines.
-
-See the [releases](https://github.com/nioc/node-red-contrib-opentelemetry/releases) on this repository for changelog.
+This project follows [Semantic Versioning](https://semver.org/). See the [releases](https://github.com/frankvdb7/node-red-contrib-opentelemetry/releases) for the changelog.
 
 ## Contributors
 
@@ -121,19 +119,8 @@ See the [releases](https://github.com/nioc/node-red-contrib-opentelemetry/releas
 - **[Wodka](https://github.com/wodka/)** - _AMQP headers and `CompositePropagator` (Jaeger, W3C, B3)_
 - **[Akrpic77](https://github.com/akrpic77/)** - _MQTT v5 context fields_
 - **[joshendriks](https://github.com/joshendriks/)** - _Protobuf trace-exporter support_
-
-See also the full list of [contributors](https://github.com/nioc/node-red-contrib-opentelemetry/graphs/contributors) to this project.
-
-## Direct dependencies
-
-- **[@opentelemetry](https://github.com/open-telemetry/opentelemetry-js)** (Apache-2.0)
-- **[jmespath](https://github.com/jmespath/jmespath.js)** (Apache-2.0)
-- **[on-finished](https://github.com/jshttp/on-finished)** (MIT)
+- **[frankvdb7](https://github.com/frankvdb7/)** - _Fork maintenance and updates_
 
 ## License
 
-This project is licensed under the GNU Lesser General Public License v3.0 - see the [LICENSE](LICENSE.md) file for details
-
-# Node-RED OpenTelemetry and Prometheus Module
-
-This is a Node-RED module for instrumenting flows with OpenTelemetry and exposing metrics in the Prometheus format.
+This project is licensed under the **GNU Lesser General Public License v3.0**. See the [LICENSE](LICENSE.md) file for details.

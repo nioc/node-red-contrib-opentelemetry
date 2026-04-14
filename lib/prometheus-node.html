@@ -63,25 +63,37 @@ RED.nodes.registerType('Prometheus Exporter', {
 </script>
 
 <script type="text/html" data-help-name="Prometheus Exporter">
-  <p>Collect http in requests metrics (count, duration) and start an export server for Prometheus scraping.</p>
-  <h3>Details</h3>
-  <p>With this node enabled, every http request processed by an http in node will be counted to measure response times.</p>
-  <p>You must set:<ul>
-    <li>the <code>port</code> and the <code>endpoint</code> of the export server (which will be scraped by your Prometheus),</li>
-    <li>the <code>service</code> name displayed,</li>
-    <li>the <code>instrument</code> name displayed.</li>
-  </ul></p>
-  <p>This node should only be added once for all your Node-Red flows (regardless of location).</p>
-  <p>In order to measure requests, it is necessary to edit <code>httpNodeMiddleware</code> in your <code>settings.js</code> file:</p>
-  <pre>
-    const { prometheusMiddleware } = require('node-red-contrib-opentelemetry/lib/prometheus-exporter.js')
+  <p>Collects metrics from <code>http in</code> nodes and exposes them for Prometheus scraping.</p>
+  <h3>Configuration</h3>
+  <dl class="message-properties">
+    <dt>Port <span class="property-type">number</span></dt>
+    <dd>The port on which the metrics server will run (default: <code>1881</code>).</dd>
+    <dt>Endpoint <span class="property-type">string</span></dt>
+    <dd>The path where metrics are exposed (default: <code>/metrics</code>).</dd>
+    <dt>Service <span class="property-type">string</span></dt>
+    <dd>The service name included in the <code>target_info</code> metric.</dd>
+    <dt>Instrument <span class="property-type">string</span></dt>
+    <dd>The name of the histogram metric for request duration (default: <code>http_request_duration</code>).</dd>
+  </dl>
+
+  <h3>Installation Requirement</h3>
+  <p>To capture metrics, you <b>must</b> add the provided middleware to your Node-RED <code>settings.js</code> file:</p>
+  <pre style="font-size: 0.8em;">
+// 1. At the top of settings.js:
+const { prometheusMiddleware } = require('@frankvdb/node-red-contrib-opentelemetry/lib/prometheus-exporter.js');
+
+// 2. In the module.exports object:
+module.exports = {
     // ...
     httpNodeMiddleware: prometheusMiddleware,
     // ...
-  </pre>
+}</pre>
+
+  <p><strong>Note:</strong> This node only needs to be added <b>once</b> in your entire Node-RED instance.</p>
+
   <h3>References</h3>
   <ul>
-    <li><a href="https://opentelemetry.io/docs/concepts/signals/metrics/" target="_blank" rel="noopener noreferrer">OpenTelemetry docs</a> - full description of OpenTelemetry.</li>
-    <li><a href="https://github.com/nioc/node-red-contrib-opentelemetry" target="_blank" rel="noopener noreferrer">Node homepage</a> - doc, issues and releases.</li>
+    <li><a href="https://prometheus.io/docs/introduction/overview/" target="_blank">Prometheus Documentation</a></li>
+    <li><a href="https://github.com/frankvdb7/node-red-contrib-opentelemetry" target="_blank">Project GitHub</a></li>
   </ul>
 </script>

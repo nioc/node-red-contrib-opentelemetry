@@ -206,26 +206,40 @@ RED.nodes.registerType('OpenTelemetry', {
 </script>
 
 <script type="text/html" data-help-name="OpenTelemetry">
-  <p>Send Node-RED traces to OpenTelemetry collector (like Jaeger or Zipkin).</p>
-  <h3>Details</h3>
-  <p>With this node enabled, each message will generate a trace composed of the traces (spans) of each node traversed.</p>
-  <p>You must set:<ul>
-    <li>the <code>url</code> of the exporter,</li>
-    <li>the <code>service</code> name displayed in your visualization tool,</li>
-    <li>optional <code>root prefix</code> that will be added to the root Node-RED span name before the initial node name,</li>
-    <li>optional comma-separated list of <code>ignored</code> nodes that will not emit a trace,</li>
-    <li>optional comma-separated list of node types that will <code>propagate</code> traces using request headers (W3C trace context propagation).</li>
-  </ul></p>
-  <p>You can add your own attributes to the generated spans by adding:<ul>
-    <li>the <code>flow</code> identifier involved (you can leave this field empty to use in all flows),</li>
-    <li>the <code>nodeType</code> involved (examples: <code>http in</code>, <code>http request</code>, <code>file in</code>, ... , you can leave this field empty to use in all node types),</li>
-    <li>an <a href="https://opentelemetry.io/docs/concepts/signals/traces/#attributes" target="_blank" rel="noopener noreferrer">OTEL span attribute <code>key</code></a> (<code>node_red.action</code> for example)</li>
-    <li>the <code>path</code> in the processed message object in <a href="https://jmespath.org/" target="_blank" rel="noopener noreferrer">JMESPath syntax</a>, starting after <code>msg.</code> (<code>payload.action</code> for example)</li>
-  </ul></p>
-  <p>This node should only be added once for all your Node-Red flows (regardless of location).</p>
+  <p>Instruments Node-RED flows with OpenTelemetry distributed tracing. This node sends traces to an OpenTelemetry collector (e.g., Jaeger, Zipkin, or OTLP-compatible backends).</p>
+  <h3>Configuration</h3>
+  <dl class="message-properties">
+    <dt>Url <span class="property-type">string</span></dt>
+    <dd>The OTLP HTTP endpoint for traces (e.g., <code>http://localhost:4318/v1/traces</code>).</dd>
+    <dt>Protocol <span class="property-type">select</span></dt>
+    <dd>The transport protocol: <code>http/json</code> or <code>http/protobuf</code>.</dd>
+    <dt>Service <span class="property-type">string</span></dt>
+    <dd>The service name that will identify these traces in your backend (default: <code>Node-RED</code>).</dd>
+    <dt>Root prefix <span class="property-type">string</span></dt>
+    <dd>An optional prefix for the root span of each message (e.g., <code>Order </code>).</dd>
+    <dt>Ignored <span class="property-type">string</span></dt>
+    <dd>A comma-separated list of node types to exclude from tracing (e.g., <code>debug,catch,inject</code>).</dd>
+    <dt>Propagate <span class="property-type">string</span></dt>
+    <dd>A comma-separated list of node types that should inject W3C Trace Context headers into outgoing requests (e.g., <code>http request</code>).</dd>
+    <dt>Timeout <span class="property-type">number</span></dt>
+    <dd>The maximum time (in seconds) to wait for a message to complete before closing its span if it gets "lost" in the flow.</dd>
+  </dl>
+
+  <h3>Span Attribute Mappings</h3>
+  <p>You can extract data from the <code>msg</code> object and attach it as attributes to the generated spans.</p>
+  <ul>
+    <li><strong>Timing</strong>: <code>Start</code> (before node processing) or <code>End</code> (after node processing).</li>
+    <li><strong>Flow ID</strong>: Optional. Only apply mapping if the message is in this flow.</li>
+    <li><strong>Node Type</strong>: Optional. Only apply mapping for nodes of this type (e.g., <code>http request</code>).</li>
+    <li><strong>OTEL Key</strong>: The name of the attribute in OpenTelemetry (e.g., <code>customer.id</code>).</li>
+    <li><strong>Msg Path</strong>: The <a href="https://jmespath.org/" target="_blank">JMESPath</a> query to extract data from <code>msg</code> (e.g., <code>payload.userId</code>).</li>
+  </ul>
+
+  <p><strong>Note:</strong> This node only needs to be added <b>once</b> in your entire Node-RED instance to enable tracing for all flows.</p>
+
   <h3>References</h3>
   <ul>
-    <li><a href="https://opentelemetry.io/docs/" target="_blank" rel="noopener noreferrer">OpenTelemetry docs</a> - full description of OpenTelemetry.</li>
-    <li><a href="https://github.com/nioc/node-red-contrib-opentelemetry" target="_blank" rel="noopener noreferrer">Node homepage</a> - doc, issues and releases.</li>
+    <li><a href="https://opentelemetry.io/docs/" target="_blank">OpenTelemetry Documentation</a></li>
+    <li><a href="https://github.com/frankvdb7/node-red-contrib-opentelemetry" target="_blank">Project GitHub</a></li>
   </ul>
 </script>
