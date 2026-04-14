@@ -1,0 +1,21 @@
+name: Publish Package to npmjs
+on:
+  release:
+    types: [published]
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Setup .npmrc file to publish to npm
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+      - run: npm ci
+      - run: npm run build:production --if-present
+      - run: npm publish
