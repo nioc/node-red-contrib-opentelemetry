@@ -1,26 +1,95 @@
 [
-	{
-		"id": "1dc4c3fe2e38934c",
-		"type": "tab",
-		"label": "OpenTelemetry",
-		"disabled": false,
-		"info": "This is an example of a flow for the OpenTelemetry node.",
-		"env": []
-	},
-	{
-		"id": "ac125c4c6d10643e",
-		"type": "OpenTelemetry",
-		"z": "1dc4c3fe2e38934c",
-		"name": "",
-		"url": "http://localhost:4318/v1/traces",
-		"serviceName": "Node-RED",
-		"rootPrefix": "Message",
-		"timeout": "10",
-		"ignoredTypes": "debug,catch",
-		"propagateHeadersTypes": "",
-		"isLogging": false,
-		"x": 760,
-		"y": 160,
-		"wires": []
-	}
+    {
+        "id": "f6f2187d.f172e8",
+        "type": "tab",
+        "label": "OpenTelemetry Example",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "ac125c4c6d10643e",
+        "type": "OpenTelemetry",
+        "z": "f6f2187d.f172e8",
+        "name": "OTEL Config",
+        "url": "http://localhost:4318/v1/traces",
+        "serviceName": "Node-RED-Tracing-Demo",
+        "protocol": "http",
+        "rootPrefix": "Message ",
+        "timeout": 10,
+        "ignoredTypes": "debug,catch",
+        "propagateHeadersTypes": "http request",
+        "isLogging": false,
+        "attributeMappings": [
+            {
+                "isAfter": false,
+                "flow": "",
+                "nodeType": "http in",
+                "key": "http.method",
+                "path": "req.method"
+            }
+        ],
+        "x": 140,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "1",
+        "type": "inject",
+        "z": "f6f2187d.f172e8",
+        "name": "Trigger Trace",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"test\":\"data\"}",
+        "payloadType": "json",
+        "x": 130,
+        "y": 180,
+        "wires": [
+            [
+                "2"
+            ]
+        ]
+    },
+    {
+        "id": "2",
+        "type": "function",
+        "z": "f6f2187d.f172e8",
+        "name": "Processing Step",
+        "func": "msg.payload.processed = true;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 340,
+        "y": 180,
+        "wires": [
+            [
+                "3"
+            ]
+        ]
+    },
+    {
+        "id": "3",
+        "type": "debug",
+        "z": "f6f2187d.f172e8",
+        "name": "Result",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 530,
+        "y": 180,
+        "wires": []
+    }
 ]
