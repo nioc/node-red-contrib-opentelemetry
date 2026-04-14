@@ -6,10 +6,13 @@
 		"lint": "biome lint .",
 		"format": "biome format --write .",
 		"format:check": "biome format .",
-		"test": "node --test"
+		"build": "npm run format:check",
+		"build:production": "npm run format:check",
+		"test": "node --test",
+		"test:cov": "node --test --experimental-test-coverage"
 	},
 	"engines": {
-		"node": ">=20.0.0"
+		"node": ">=22.0.0"
 	},
 	"keywords": [
 		"node-red",
@@ -33,14 +36,18 @@
 	},
 	"bugs": "https://github.com/frankvdb7/node-red-contrib-opentelemetry/issues",
 	"node-red": {
-		"version": ">=2.0.0",
+		"version": ">=4.0.0",
 		"nodes": {
 			"opentelemetry": "lib/opentelemetry-node.js",
 			"prometheus": "lib/prometheus-node.js"
+		},
+		"plugins": {
+			"opentelemetry-runtime": "lib/opentelemetry-node.js",
+			"prometheus-runtime": "lib/prometheus-node.js"
 		}
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^1.0.0"
+		"@biomejs/biome": "^2.4.11"
 	},
 	"dependencies": {
 		"@opentelemetry/api": "^1.9.0",
