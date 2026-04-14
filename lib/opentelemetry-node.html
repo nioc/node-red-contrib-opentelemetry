@@ -42,6 +42,23 @@ RED.nodes.registerType('OpenTelemetry', {
         }
       },
     },
+    metricsUrl: {
+      value: 'http://localhost:4318/v1/metrics',
+      required: false,
+    },
+    logsUrl: {
+      value: 'http://localhost:4318/v1/logs',
+      required: false,
+    },
+    tracesEnabled: {
+      value: true,
+    },
+    metricsEnabled: {
+      value: false,
+    },
+    logsEnabled: {
+      value: false,
+    },
     serviceName: {
       value: 'Node-RED',
       required: true,
@@ -161,12 +178,20 @@ RED.nodes.registerType('OpenTelemetry', {
     <input type="text" id="node-input-name" placeholder="Name">
   </div>
   <hr/>
-  <div class="form-row" title="OpenTelemetry exporter endpoint">
-    <label for="node-input-url"><i class="fa fa-globe"></i> Url</label>
+  <div class="form-row" title="OpenTelemetry traces exporter endpoint">
+    <label for="node-input-url"><i class="fa fa-globe"></i> Traces URL</label>
     <input type="text" id="node-input-url" placeholder="http://localhost:4318/v1/traces">
   </div>
+  <div class="form-row" title="OpenTelemetry metrics exporter endpoint">
+    <label for="node-input-metricsUrl"><i class="fa fa-globe"></i> Metrics URL</label>
+    <input type="text" id="node-input-metricsUrl" placeholder="http://localhost:4318/v1/metrics">
+  </div>
+  <div class="form-row" title="OpenTelemetry logs exporter endpoint">
+    <label for="node-input-logsUrl"><i class="fa fa-globe"></i> Logs URL</label>
+    <input type="text" id="node-input-logsUrl" placeholder="http://localhost:4318/v1/logs">
+  </div>
   <div class="form-row" title="OpenTelemetry exporter protocol">
-    <label for="node-input-protocol"><i class="fa fa-globe"></i> Protocol</label>
+    <label for="node-input-protocol"><i class="fa fa-cog"></i> Protocol</label>
     <select id="node-input-protocol">
       <option value="http">http/json</option>
       <option value="proto">http/protobuf</option>
@@ -176,11 +201,21 @@ RED.nodes.registerType('OpenTelemetry', {
     <label for="node-input-serviceName"><i class="fa fa-server"></i> Service</label>
     <input type="text" id="node-input-serviceName" placeholder="Node-RED">
   </div>
+  <div class="form-row">
+    <label style="width: auto;"><i class="fa fa-check-square-o"></i> Enable Signals:</label>
+    <div style="display: inline-block; margin-left: 10px;">
+      <input type="checkbox" id="node-input-tracesEnabled" style="display: inline-block; width: auto; vertical-align: top;">
+      <label for="node-input-tracesEnabled" style="width: auto;">Traces</label>
+      <input type="checkbox" id="node-input-metricsEnabled" style="display: inline-block; width: auto; vertical-align: top; margin-left: 10px;">
+      <label for="node-input-metricsEnabled" style="width: auto;">Metrics</label>
+      <input type="checkbox" id="node-input-logsEnabled" style="display: inline-block; width: auto; vertical-align: top; margin-left: 10px;">
+      <label for="node-input-logsEnabled" style="width: auto;">Logs</label>
+    </div>
+  </div>
   <div class="form-row" title="Prefix added in the root Node-RED span name before initial node name">
     <label for="node-input-rootPrefix"><i class="fa fa-tag"></i> Root prefix</label>
     <input type="text" id="node-input-rootPrefix" placeholder="Message ">
-  </div>
-  <div class="form-row" title="Do not trace nodes of these types">
+  </div>  <div class="form-row" title="Do not trace nodes of these types">
     <label for="node-input-ignoredTypes"><i class="fa fa-ban"></i> Ignored</label>
     <input type="text" id="node-input-ignoredTypes" placeholder="debug,catch">
   </div>

@@ -2,6 +2,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const otelModule = require("../lib/opentelemetry-node");
 
+const mockRed = {
+	nodes: {
+		getNode: (id) => ({ name: `Flow ${id}` }),
+	},
+};
+
 const {
 	getMsgId,
 	getSpanId,
@@ -213,6 +219,7 @@ test("createSpan creates parent and child spans for new messages", () => {
 		},
 	};
 	const span = createSpan(
+		mockRed,
 		tracer,
 		{ _msgid: "1" },
 		{ id: "node", type: "function", name: "Function", z: "flow" },
@@ -234,8 +241,8 @@ test("createSpan skips creation when span already exists", () => {
 	};
 	const msg = { _msgid: "1" };
 	const node = { id: "node", type: "function", name: "Function", z: "flow" };
-	assert.ok(createSpan(tracer, msg, node, {}, false));
-	assert.equal(createSpan(tracer, msg, node, {}, false), undefined);
+	assert.ok(createSpan(mockRed, tracer, msg, node, {}, false));
+	assert.equal(createSpan(mockRed, tracer, msg, node, {}, false), undefined);
 });
 
 test("createSpan stores fake span when tracing disabled for node", () => {
@@ -244,7 +251,7 @@ test("createSpan stores fake span when tracing disabled for node", () => {
 	};
 	const msg = { _msgid: "1" };
 	const node = { id: "node", type: "function", name: "Function", z: "flow" };
-	const span = createSpan(tracer, msg, node, {}, true);
+	const span = createSpan(mockRed, tracer, msg, node, {}, true);
 	assert.equal(typeof span.end, "function");
 	const spansMap = getMsgSpans();
 	const storedSpan = spansMap.get("1").spans.get("1#node");
@@ -258,13 +265,13 @@ test("endSpan ends child span and clears parent when last span completes", () =>
 	};
 	const msg = { _msgid: "1" };
 	const node = { id: "node", type: "function", name: "Function", z: "flow" };
-	const childSpan = createSpan(tracer, msg, node, {}, false);
+	const childSpan = createSpan(mockRed, tracer, msg, node, {}, false);
 	const entry = getMsgSpans().get("1");
 	let parentEnded = false;
 	entry.parentSpan.end = () => {
 		parentEnded = true;
 	};
-	endSpan(msg, null, node);
+	endSpan(mockRed, msg, null, node);
 	assert.equal(childSpan.ended, true);
 	assert.equal(parentEnded, true);
 	assert.equal(getMsgSpans().size, 0);
@@ -289,7 +296,7 @@ test("deleteOutdatedMsgSpans removes outdated entries", () => {
 test("logEvent should not log when logging is disabled", () => {
 	setLogging(false);
 	const consoleLogSpy = test.mock.method(console, "log");
-	logEvent({}, "test", {});
+	logEvent(mockRed, {}, "test", {});
 	assert.equal(consoleLogSpy.mock.calls.length, 0);
 });
 
@@ -306,11 +313,11 @@ test("createSpan should handle various node types correctly", () => {
 	};
 	const tcpNode = { id: "tcp-node", type: "tcp in", name: "TCP In", z: "flow" };
 
-	createSpan(tracer, msg, httpNode, {}, false);
+	createSpan(mockRed, tracer, msg, httpNode, {}, false);
 	const httpSpans = getMsgSpans().get("1");
 	assert.ok(httpSpans.parentSpan);
 
-	createSpan(tracer, { _msgid: "2" }, tcpNode, {}, false);
+	createSpan(mockRed, tracer, { _msgid: "2" }, tcpNode, {}, false);
 	const tcpSpans = getMsgSpans().get("2");
 	assert.ok(tcpSpans.parentSpan);
 });
@@ -326,7 +333,7 @@ test("createSpan should extract trace context from different sources", () => {
 		name: "MQTT In",
 		z: "flow",
 	};
-	createSpan(tracer, mqttMsg, mqttNode, {}, false);
+	createSpan(mockRed, tracer, mqttMsg, mqttNode, {}, false);
 	assert.ok(getMsgSpans().has("3"));
 
 	const amqpMsg = { _msgid: "4", properties: { headers: {} } };
@@ -336,7 +343,7 @@ test("createSpan should extract trace context from different sources", () => {
 		name: "AMQP In",
 		z: "flow",
 	};
-	createSpan(tracer, amqpMsg, amqpNode, {}, false);
+	createSpan(mockRed, tracer, amqpMsg, amqpNode, {}, false);
 	assert.ok(getMsgSpans().has("4"));
 });
 
@@ -355,8 +362,8 @@ test("endSpan should handle http request and response correctly", () => {
 		name: "HTTP Request",
 		z: "flow",
 	};
-	const childSpan = createSpan(tracer, { _msgid: "1" }, node, {}, false);
-	endSpan(msg, null, node);
+	const childSpan = createSpan(mockRed, tracer, { _msgid: "1" }, node, {}, false);
+	endSpan(mockRed, msg, null, node);
 	assert.equal(childSpan.ended, true);
 	assert.deepEqual(childSpan.attributes["http.response.status_code"], 200);
 });
@@ -367,9 +374,9 @@ test("endSpan should handle errors correctly", () => {
 	};
 	const msg = { _msgid: "1", error: new Error("test error") };
 	const node = { id: "node", type: "function", name: "Function", z: "flow" };
-	const childSpan = createSpan(tracer, msg, node, {}, false);
+	const childSpan = createSpan(mockRed, tracer, msg, node, {}, false);
 	const recordExceptionSpy = test.mock.method(childSpan, "recordException");
-	endSpan(msg, "error", node);
+	endSpan(mockRed, msg, "error", node);
 	assert.equal(recordExceptionSpy.mock.calls.length, 1);
 });
 
@@ -385,7 +392,7 @@ test("createSpan should handle websocket nodes correctly", () => {
 		z: "flow",
 		serverConfig: { path: "/ws/in" },
 	};
-	createSpan(tracer, wsInMsg, wsInNode, {}, false);
+	createSpan(mockRed, tracer, wsInMsg, wsInNode, {}, false);
 	const wsInSpans = getMsgSpans().get("ws-in");
 	assert.ok(wsInSpans.parentSpan);
 	assert.deepEqual(wsInSpans.parentSpan.attributes["url.path"], "/ws/in");
@@ -398,7 +405,7 @@ test("createSpan should handle websocket nodes correctly", () => {
 		z: "flow",
 		serverConfig: { path: "ws://localhost:1880/ws/out" },
 	};
-	const wsOutSpan = createSpan(tracer, wsOutMsg, wsOutNode, {}, false);
+	const wsOutSpan = createSpan(mockRed, tracer, wsOutMsg, wsOutNode, {}, false);
 	assert.ok(wsOutSpan);
 	assert.deepEqual(wsOutSpan.attributes["url.path"], "/ws/out");
 	assert.deepEqual(wsOutSpan.attributes["server.address"], "localhost");
@@ -412,11 +419,11 @@ test("endSpan should set span status to ERROR on error", () => {
 	};
 	const msg = { _msgid: "1" };
 	const node = { id: "node", type: "function", name: "Function", z: "flow" };
-	const childSpan = createSpan(tracer, msg, node, {}, false);
+	const childSpan = createSpan(mockRed, tracer, msg, node, {}, false);
 	const setStatusSpy = test.mock.method(childSpan, "setStatus");
 	const parentSpan = getMsgSpans().get("1").parentSpan;
 	const parentSetStatusSpy = test.mock.method(parentSpan, "setStatus");
-	endSpan(msg, new Error("test error"), node);
+	endSpan(mockRed, msg, new Error("test error"), node);
 	assert.equal(setStatusSpy.mock.calls.length, 1);
 	assert.deepEqual(setStatusSpy.mock.calls[0].arguments[0].code, 2); // 2 = ERROR
 	assert.equal(parentSetStatusSpy.mock.calls.length, 1);
@@ -646,6 +653,7 @@ test("node constructor applies defaults for missing optional config", async () =
 			registerType: (_name, constructor) => {
 				NodeConstructor = constructor;
 			},
+			getNode: (id) => ({ name: `Flow ${id}` }),
 		},
 		hooks: {
 			listeners: {},
@@ -685,6 +693,7 @@ test("node constructor applies defaults for missing optional config", async () =
 		},
 	};
 	createSpan(
+		mockRed,
 		tracer,
 		{ _msgid: "defaults-msg" },
 		{ id: "node", type: "function", name: "Function", z: "flow" },
@@ -717,6 +726,7 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 			registerType: (_name, constructor) => {
 				NodeConstructor = constructor;
 			},
+			getNode: (id) => ({ name: `Flow ${id}` }),
 		},
 		hooks: {
 			listeners: {},
@@ -786,16 +796,16 @@ test("endSpan should handle orphan spans from switch nodes", () => {
 	};
 
 	// Create a parent span and a switch span
-	createSpan(tracer, msg, switchNode, {}, false);
+	createSpan(mockRed, tracer, msg, switchNode, {}, false);
 	const parent = getMsgSpans().get("1");
 	assert.ok(parent);
 
 	// Create a function span that will be ended
-	const functionSpan = createSpan(tracer, msg, functionNode, {}, false);
+	const functionSpan = createSpan(mockRed, tracer, msg, functionNode, {}, false);
 	assert.ok(functionSpan);
 
 	// End the function span. This should trigger the orphan logic for the switch span.
-	endSpan(msg, null, functionNode);
+	endSpan(mockRed, msg, null, functionNode);
 
 	// The parent span should be ended because the only remaining child is an orphan
 	assert.equal(getMsgSpans().size, 0);
