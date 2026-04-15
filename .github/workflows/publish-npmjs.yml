@@ -18,4 +18,4 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:production --if-present
-      - run: npm publish
+      - run: npm publish --provenance --access public
