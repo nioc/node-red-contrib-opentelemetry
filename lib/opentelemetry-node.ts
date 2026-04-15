@@ -26,7 +26,10 @@ import {
 } from "@opentelemetry/core";
 import { B3InjectEncoding, B3Propagator } from "@opentelemetry/propagator-b3";
 import { JaegerPropagator } from "@opentelemetry/propagator-jaeger";
-import { Resource } from "@opentelemetry/resources";
+import {
+	resourceFromAttributes,
+	type Resource,
+} from "@opentelemetry/resources";
 import {
 	BatchLogRecordProcessor,
 	LoggerProvider,
@@ -1360,7 +1363,7 @@ function applyResolvedRuntimeConfig(resolvedConfig: ResolvedOTELConfig): void {
 }
 
 function createCommonResource(serviceName: string): Resource {
-	return new Resource({
+	return resourceFromAttributes({
 		[ATTR_SERVICE_NAME]: serviceName,
 		[ATTR_HOST_NAME]: os.hostname(),
 	});
@@ -1476,10 +1479,8 @@ function initializeLoggerProvider(
 				})();
 	const loggerProvider = new LoggerProvider({
 		resource: commonResource,
+		processors: [new BatchLogRecordProcessor(logExporter)],
 	});
-	loggerProvider.addLogRecordProcessor(
-		new BatchLogRecordProcessor(logExporter),
-	);
 	const selectedLoggerProvider = logs.setGlobalLoggerProvider(loggerProvider);
 	if (selectedLoggerProvider !== loggerProvider) {
 		consoleLog(
