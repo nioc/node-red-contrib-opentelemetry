@@ -50,7 +50,7 @@ test("OpenTelemetry config node contention: nodes share state and hooks are refe
 	otelModule(mockRed);
 	const OpenTelemetry = mockRed.nodes.OpenTelemetry;
 
-	let close1, close2;
+	let close1: any, close2: any;
 	const node1 = {
 		on: (ev, cb) => {
 			if (ev === "close") close1 = cb;
@@ -112,3 +112,4 @@ test("OpenTelemetry config node contention: nodes share state and hooks are refe
 	assert.equal(sharedState.meterProvider, null);
 	assert.equal(sharedState.loggerProvider, null);
 });
+

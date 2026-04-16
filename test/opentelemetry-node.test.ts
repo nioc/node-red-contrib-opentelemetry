@@ -1027,7 +1027,7 @@ test("endSpan keeps error status when terminal response has 2xx status", () => {
 });
 
 test("postDeliver.otel hook injects trace context for http and mqtt", async (_t) => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1054,7 +1054,7 @@ test("postDeliver.otel hook injects trace context for http and mqtt", async (_t)
 
 	otelModule(mockRed);
 
-	let closeHandler;
+	let closeHandler: any;
 	const nodeInstance = {
 		on: (event, handler) => {
 			if (event === "close") closeHandler = handler;
@@ -1126,7 +1126,7 @@ test("postDeliver.otel hook injects trace context for http and mqtt", async (_t)
 });
 
 test("preDeliver.otel hook clears all propagated trace headers safely", () => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1196,7 +1196,7 @@ test("preDeliver.otel hook clears all propagated trace headers safely", () => {
 });
 
 test("onReceive.otel hook sets otelRootMsgId for split nodes", () => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1243,7 +1243,7 @@ test("onReceive.otel hook sets otelRootMsgId for split nodes", () => {
 });
 
 test("node constructor applies defaults for missing optional config", async () => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1264,7 +1264,7 @@ test("node constructor applies defaults for missing optional config", async () =
 	};
 	otelModule(mockRed);
 
-	let closeHandler;
+	let closeHandler: any;
 	const nodeInstance = {
 		on: (event, handler) => {
 			if (event === "close") closeHandler = handler;
@@ -1316,7 +1316,7 @@ test("node constructor applies defaults for missing optional config", async () =
 });
 
 test("onSend captures start time and metrics work when traces are disabled", async () => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1336,7 +1336,7 @@ test("onSend captures start time and metrics work when traces are disabled", asy
 	};
 	otelModule(mockRed);
 
-	let closeHandler;
+	let closeHandler: any;
 	const nodeInstance = {
 		on: (event, handler) => {
 			if (event === "close") closeHandler = handler;
@@ -1395,7 +1395,7 @@ test("onSend captures start time and metrics work when traces are disabled", asy
 });
 
 test("node shutdown should not disable global OpenTelemetry APIs", async () => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1412,7 +1412,7 @@ test("node shutdown should not disable global OpenTelemetry APIs", async () => {
 	};
 	otelModule(mockRed);
 
-	let closeHandler;
+	let closeHandler: any;
 	const nodeInstance = {
 		on: (event, handler) => {
 			if (event === "close") closeHandler = handler;
@@ -1438,7 +1438,7 @@ test("node shutdown should not disable global OpenTelemetry APIs", async () => {
 });
 
 test("initOTEL does not create providers when all signals are disabled", () => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1476,7 +1476,7 @@ test("initOTEL does not create providers when all signals are disabled", () => {
 });
 
 test("initOTEL creates only configured signal providers", async () => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1493,7 +1493,7 @@ test("initOTEL creates only configured signal providers", async () => {
 	};
 	otelModule(mockRed);
 
-	let closeHandler;
+	let closeHandler: any;
 	const nodeInstance = {
 		on: (event, handler) => {
 			if (event === "close") closeHandler = handler;
@@ -1519,7 +1519,7 @@ test("initOTEL creates only configured signal providers", async () => {
 });
 
 test("node init keeps local providers when global providers are already set", async () => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1536,7 +1536,7 @@ test("node init keeps local providers when global providers are already set", as
 	};
 	otelModule(mockRed);
 
-	let closeHandler;
+	let closeHandler: any;
 	const nodeInstance = {
 		on: (event, handler) => {
 			if (event === "close") closeHandler = handler;
@@ -1584,7 +1584,7 @@ test("node init keeps local providers when global providers are already set", as
 });
 
 test("runtime plugin onSettings does not leak lifecycle ref count", async () => {
-	let runtimePlugin;
+	let runtimePlugin: any;
 	const mockRed = {
 		nodes: {
 			createNode: () => {},
@@ -1625,7 +1625,7 @@ test("runtime plugin onSettings does not leak lifecycle ref count", async () => 
 });
 
 test("runtime plugin onSettings updates runtime config without extra lifecycle ref", async () => {
-	let runtimePlugin;
+	let runtimePlugin: any;
 	const mockRed = {
 		nodes: {
 			createNode: () => {},
@@ -1672,7 +1672,7 @@ test("runtime plugin onSettings updates runtime config without extra lifecycle r
 });
 
 test("runtime plugin onSettings reconfigures active providers", async () => {
-	let runtimePlugin;
+	let runtimePlugin: any;
 	const mockRed = {
 		nodes: {
 			createNode: () => {},
@@ -1727,8 +1727,8 @@ test("runtime plugin onSettings reconfigures active providers", async () => {
 });
 
 test("runtime plugin onSettings is ignored when config node exists", async () => {
-	let NodeConstructor;
-	let runtimePlugin;
+	let NodeConstructor: any;
+	let runtimePlugin: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1753,7 +1753,7 @@ test("runtime plugin onSettings is ignored when config node exists", async () =>
 	assert.ok(NodeConstructor);
 	assert.ok(runtimePlugin);
 
-	let closeHandler;
+	let closeHandler: any;
 	const nodeInstance = {
 		on: (event, handler) => {
 			if (event === "close") closeHandler = handler;
@@ -1788,7 +1788,7 @@ test("runtime plugin onSettings is ignored when config node exists", async () =>
 });
 
 test("runtime plugin onSettings awaits provider shutdown before reconfigure", async () => {
-	let runtimePlugin;
+	let runtimePlugin: any;
 	const mockRed = {
 		nodes: {
 			createNode: () => {},
@@ -1820,7 +1820,7 @@ test("runtime plugin onSettings awaits provider shutdown before reconfigure", as
 	const sharedState = getSharedState();
 	assert.ok(sharedState.provider);
 	const oldProvider = sharedState.provider;
-	let resolveShutdown;
+	let resolveShutdown: any;
 	let shutdownCompleted = false;
 	oldProvider.shutdown = () =>
 		new Promise((resolve) => {
@@ -1851,7 +1851,7 @@ test("runtime plugin onSettings awaits provider shutdown before reconfigure", as
 });
 
 test("onSend.otel hook creates spans for every event in batch", async () => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1872,7 +1872,7 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 	};
 	otelModule(mockRed);
 
-	let closeHandler;
+	let closeHandler: any;
 	const nodeInstance = {
 		on: (event, handler) => {
 			if (event === "close") closeHandler = handler;
@@ -1912,7 +1912,7 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 });
 
 test("node close waits for provider shutdown before invoking done", async () => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1929,7 +1929,7 @@ test("node close waits for provider shutdown before invoking done", async () => 
 	};
 	otelModule(mockRed);
 
-	let closeHandler;
+	let closeHandler: any;
 	let doneCalled = false;
 	const nodeInstance = {
 		on: (event, handler) => {
@@ -1947,7 +1947,7 @@ test("node close waits for provider shutdown before invoking done", async () => 
 
 	const sharedState = getSharedState();
 	assert.ok(sharedState.provider);
-	let resolveShutdown;
+	let resolveShutdown: any;
 	sharedState.provider.shutdown = () =>
 		new Promise((resolve) => {
 			resolveShutdown = resolve;
@@ -1965,7 +1965,7 @@ test("node close waits for provider shutdown before invoking done", async () => 
 });
 
 test("node close supports (removed, done) signature", async () => {
-	let NodeConstructor;
+	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
 			createNode: (node, config) => {
@@ -1982,7 +1982,7 @@ test("node close supports (removed, done) signature", async () => {
 	};
 	otelModule(mockRed);
 
-	let closeHandler;
+	let closeHandler: any;
 	let doneCalled = false;
 	const nodeInstance = {
 		on: (event, handler) => {
@@ -1999,7 +1999,7 @@ test("node close supports (removed, done) signature", async () => {
 
 	const sharedState = getSharedState();
 	assert.ok(sharedState.provider);
-	let resolveShutdown;
+	let resolveShutdown: any;
 	sharedState.provider.shutdown = () =>
 		new Promise((resolve) => {
 			resolveShutdown = resolve;
@@ -2083,4 +2083,5 @@ test("endSpan keeps parent active when remaining child span is non-orphan", () =
 	assert.ok(parent);
 	assert.equal(parent.spans.has("active-child-msg#function-node-b"), true);
 });
+
 
