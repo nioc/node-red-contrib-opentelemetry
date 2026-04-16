@@ -1682,6 +1682,33 @@ async function shutdownSignalProviders(): Promise<void> {
 module.exports = (RED: RuntimeApi) => {
 	let runtimePluginInitialized = false;
 	let activeConfigNodes = 0;
+	function registerNodeTypeOnce(): void {
+		try {
+			RED.nodes.registerType("OpenTelemetry", OpenTelemetryNode);
+		} catch (error) {
+			if (!isAlreadyRegisteredError(error)) {
+				throw error;
+			}
+			consoleLog(
+				"debug",
+				"Node-RED config node type 'OpenTelemetry' already registered; skipping duplicate registration.",
+			);
+		}
+	}
+
+	function registerRuntimePluginOnce(plugin: RuntimePluginRegistration): void {
+		try {
+			RED.plugins?.registerRuntimePlugin?.(plugin);
+		} catch (error) {
+			if (!isAlreadyRegisteredError(error)) {
+				throw error;
+			}
+			consoleLog(
+				"debug",
+				"Node-RED runtime plugin already registered; skipping duplicate registration.",
+			);
+		}
+	}
 	/**
 	 * Initialize the OpenTelemetry system. Can be called by the Plugin API or a Node instance.
 	 * @param {OTELConfig} config Optional configuration to override defaults
@@ -1780,12 +1807,12 @@ module.exports = (RED: RuntimeApi) => {
 			if (typeof done === "function") done();
 		});
 	}
-	RED.nodes.registerType("OpenTelemetry", OpenTelemetryNode);
+	registerNodeTypeOnce();
 
 	// Support Node-RED 4+ Runtime Plugin
 	// If loaded as a plugin, it won't have a config object, but can read from env vars
 	if (RED.plugins && typeof RED.plugins.registerRuntimePlugin === "function") {
-		RED.plugins.registerRuntimePlugin({
+		registerRuntimePluginOnce({
 			id: "opentelemetry-runtime",
 			onSettings: async (settings: unknown) => {
 				if (activeConfigNodes > 0) {

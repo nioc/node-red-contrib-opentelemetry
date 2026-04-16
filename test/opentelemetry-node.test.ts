@@ -1624,6 +1624,41 @@ test("runtime plugin onSettings does not leak lifecycle ref count", async () => 
 	assert.equal(getSharedState().provider, null);
 });
 
+test("module initialization tolerates duplicate Node-RED registration", () => {
+	const registeredNodeTypes = new Set();
+	const registeredPlugins = new Set();
+	const mockRed = {
+		nodes: {
+			createNode: () => {},
+			registerType: (name) => {
+				if (registeredNodeTypes.has(name)) {
+					throw new Error(`${name} already registered`);
+				}
+				registeredNodeTypes.add(name);
+			},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+		plugins: {
+			registerRuntimePlugin: (plugin) => {
+				if (registeredPlugins.has(plugin.id)) {
+					throw new Error(`${plugin.id} already registered`);
+				}
+				registeredPlugins.add(plugin.id);
+			},
+		},
+	};
+
+	assert.doesNotThrow(() => {
+		otelModule(mockRed);
+		otelModule(mockRed);
+	});
+	assert.equal(registeredNodeTypes.has("OpenTelemetry"), true);
+	assert.equal(registeredPlugins.has("opentelemetry-runtime"), true);
+});
+
 test("runtime plugin onSettings updates runtime config without extra lifecycle ref", async () => {
 	let runtimePlugin: any;
 	const mockRed = {
