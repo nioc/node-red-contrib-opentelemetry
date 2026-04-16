@@ -1720,19 +1720,45 @@ module.exports = (RED: RuntimeApi) => {
 		const trackLifecycle = options.trackLifecycle ?? true;
 		// get config
 		const resolvedConfig = resolveOpenTelemetryConfig(config);
-			const {
-				url,
-				metricsUrl,
-				logsUrl,
-				tracesProtocol,
-				metricsProtocol,
-				logsProtocol,
-				serviceName,
-				tracesEnabled,
-				metricsEnabled,
-				logsEnabled,
-			} = resolvedConfig;
-			applyResolvedRuntimeConfig(resolvedConfig);
+		const {
+			url,
+			metricsUrl,
+			logsUrl,
+			tracesProtocol,
+			metricsProtocol,
+			logsProtocol,
+			serviceName,
+			tracesEnabled,
+			metricsEnabled,
+			logsEnabled,
+		} = resolvedConfig;
+		applyResolvedRuntimeConfig(resolvedConfig);
+		const startupConfigSummary = {
+			serviceName,
+			logLevel: resolvedConfig.logLevel,
+			tracesEnabled,
+			tracesProtocol,
+			tracesUrl: tracesEnabled ? url : "disabled",
+			metricsEnabled,
+			metricsProtocol,
+			metricsUrl: metricsEnabled ? metricsUrl : "disabled",
+			logsEnabled,
+			logsProtocol,
+			logsUrl: logsEnabled ? logsUrl : "disabled",
+			rootPrefix: resolvedConfig.rootPrefix,
+			ignoredNodeTypes: resolvedConfig.ignoredNodeTypes,
+			propagateHeaderNodeTypes: resolvedConfig.propagateHeaderNodeTypes,
+			timeout: resolvedConfig.timeout,
+			attributeMappings: resolvedConfig.attributeMappings.length,
+		};
+		consoleLog(
+			"warn",
+			`OpenTelemetry startup config: ${JSON.stringify(startupConfigSummary)}`,
+		);
+		consoleLog(
+			"debug",
+			`OpenTelemetry startup endpoints: traces(${tracesProtocol})=${url ?? "disabled"}, metrics(${metricsProtocol})=${metricsUrl ?? "disabled"}, logs(${logsProtocol})=${logsUrl ?? "disabled"}`,
+		);
 		if (
 			!trackLifecycle &&
 			(sharedState.refCount > 0 ||
@@ -1740,6 +1766,7 @@ module.exports = (RED: RuntimeApi) => {
 				sharedState.meterProvider ||
 				sharedState.loggerProvider)
 		) {
+			consoleLog("debug", "OpenTelemetry startup: replacing existing providers");
 			await shutdownSignalProviders();
 		}
 		const commonResource = createCommonResource(serviceName);
@@ -1759,6 +1786,7 @@ module.exports = (RED: RuntimeApi) => {
 		if (!sharedState.hooksRegistered) {
 			registerRuntimeHooks(RED);
 			sharedState.hooksRegistered = true;
+			consoleLog("info", "OpenTelemetry startup: runtime hooks registered");
 		}
 
 		if (trackLifecycle) {
