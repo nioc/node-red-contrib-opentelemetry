@@ -51,30 +51,56 @@ Restart Node-RED after installation to pick up the new nodes.
 
 ### Configuration
 
-1.  Add the **OTEL** node **once** to any flow.
-2.  Configure the node:
-    -   **Traces URL**: OTLP endpoint for traces (e.g., `http://localhost:4318/v1/traces`).
-    -   **Metrics URL**: OTLP endpoint for metrics (e.g., `http://localhost:4318/v1/metrics`).
-    -   **Logs URL**: OTLP endpoint for logs (e.g., `http://localhost:4318/v1/logs`).
-    -   **Enable Signals**: Checkbox to enable/disable Traces, Metrics, and Logs individually.
-    -   **Protocol**: Choose `http/json` or `http/protobuf`.
-    -   **Service Name**: The name displayed in your OTLP backend.
-    -   **Root Prefix**: Optional prefix for the root span name.
-    -   **Ignored Types**: Comma-separated list of node types to exclude from tracing.
-    -   **Propagate**: Comma-separated list of node types that should propagate trace context.
-    -   **Timeout**: Seconds after which an unmodified message span will be closed.
-    -   **Span Attribute Mappings**: Define custom attributes using [JMESPath](https://jmespath.org/) syntax to extract data from the `msg` object.
+This module uses a global runtime plugin plus an **OpenTelemetry config node**.
+
+You do **not** need to place a regular flow-processing node for tracing to work.
+
+1.  Add/configure one **OpenTelemetry** config node (or use environment variables only).
+2.  Deploy.
+3.  Instrumentation applies across flows.
+
+Config fields:
+-   **Traces URL**: OTLP endpoint for traces (e.g., `http://localhost:4318/v1/traces`).
+-   **Metrics URL**: OTLP endpoint for metrics (e.g., `http://localhost:4318/v1/metrics`).
+-   **Logs URL**: OTLP endpoint for logs (e.g., `http://localhost:4318/v1/logs`).
+-   **Enable Signals**: Enable/disable Traces, Metrics, and Logs individually.
+-   **Protocol**: `http/json` or `http/protobuf`.
+-   **Service Name**: Service name shown in your telemetry backend.
+-   **Root Span Name Prefix**: Optional prefix for root span names (default: empty).
+-   **Ignored Node Types**: Comma-separated Node-RED node types excluded from tracing.
+-   **Propagate**: Comma-separated node types that should propagate trace headers.
+-   **Timeout**: Seconds after which an unmodified message span is closed.
+-   **Span Attribute Mappings**: Custom attributes using [JMESPath](https://jmespath.org/) on `msg`.
+
+### How It Works
+
+At runtime the module registers Node-RED messaging hooks and tracks spans per `msg._msgid`.
+
+1. `onSend`: starts a span for the source node when tracing is enabled for that node type.
+2. `postDeliver`: starts a span for the destination node and links it to the same message trace.
+3. `onComplete`: ends the active node span and updates status/error attributes when applicable.
+4. Periodic cleanup closes stale message span trees after `timeout`.
+
+`ignoredNodeTypes` behavior:
+- If a node type is in `ignoredNodeTypes`, spans for that node type are skipped.
+
+`propagateHeaderNodeTypes` behavior:
+- In `preDeliver`, existing trace headers are cleared for matching source node types.
+- In `postDeliver`, fresh trace headers are injected for matching destination node types.
+- Injection target is based on node type (for example HTTP headers or MQTT user properties).
 
 #### Environment Variables
-You can also use standard OpenTelemetry environment variables:
+Supported environment variables:
 - `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
 - `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
 - `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`
 - `OTEL_EXPORTER_OTLP_ENDPOINT`
 - `OTEL_EXPORTER_OTLP_PROTOCOL`
 - `OTEL_SERVICE_NAME`
+- `OTEL_LOG_LEVEL`
+- `IGNORED_NODE_TYPES`
 
-Environment variables are used only if the corresponding node fields are left at their default values.
+Environment values are applied only when the corresponding config value is unset or still at the default.
 
 ## Examples
 
@@ -98,3 +124,4 @@ This project follows [Semantic Versioning](https://semver.org/). See the [releas
 ## License
 
 This project is licensed under the **GNU Lesser General Public License v3.0**. See the [LICENSE](LICENSE.md) file for details.
+
