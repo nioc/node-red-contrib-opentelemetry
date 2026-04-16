@@ -1,8 +1,10 @@
+// @ts-nocheck
+const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const otelApi = require("@opentelemetry/api");
 const otelLogsApi = require("@opentelemetry/api-logs");
-const otelModule = require("../dist/opentelemetry-node");
+const otelModule = require("../src/nodes/opentelemetry");
 
 const mockRed = {
 	nodes: {
@@ -235,15 +237,32 @@ test("resolveOpenTelemetryConfig supports per-signal protocol env overrides", ()
 });
 
 test("resolveOpenTelemetryConfig reads log level from env variable", () => {
-	process.env.NODE_RED_OTEL_LOG_LEVEL = "debug";
+	process.env.OTEL_LOG_LEVEL = "debug";
 	const config = resolveOpenTelemetryConfig({});
 	assert.equal(config.logLevel, "debug");
 });
 
 test("resolveOpenTelemetryConfig uses explicit config log level over env", () => {
-	process.env.NODE_RED_OTEL_LOG_LEVEL = "error";
+	process.env.OTEL_LOG_LEVEL = "error";
 	const config = resolveOpenTelemetryConfig({ logLevel: "info" });
 	assert.equal(config.logLevel, "info");
+});
+
+test("resolveOpenTelemetryConfig reads ignoredNodeTypes from env variable", () => {
+	process.env.IGNORED_NODE_TYPES = "debug,catch,inject";
+	const config = resolveOpenTelemetryConfig({});
+	assert.equal(config.ignoredNodeTypes, "debug,catch,inject");
+});
+
+test("resolveOpenTelemetryConfig keeps explicit ignoredNodeTypes over env", () => {
+	process.env.IGNORED_NODE_TYPES = "debug,catch,inject";
+	const config = resolveOpenTelemetryConfig({ ignoredNodeTypes: "debug,catch" });
+	assert.equal(config.ignoredNodeTypes, "debug,catch,inject");
+
+	const explicit = resolveOpenTelemetryConfig({
+		ignoredNodeTypes: "debug,inject",
+	});
+	assert.equal(explicit.ignoredNodeTypes, "debug,inject");
 });
 
 test("resolveOpenTelemetryConfig appends signal paths for specific endpoints without path", () => {
@@ -1048,8 +1067,8 @@ test("postDeliver.otel hook injects trace context for http and mqtt", async (_t)
 		protocol: "http",
 		serviceName: "test-service",
 		rootPrefix: "",
-		ignoredTypes: "",
-		propagateHeadersTypes: "http request,mqtt out",
+		ignoredNodeTypes: "",
+		propagateHeaderNodeTypes: "http request,mqtt out",
 		logLevel: "off",
 		timeout: 10,
 		attributeMappings: [],
@@ -1137,8 +1156,8 @@ test("preDeliver.otel hook clears all propagated trace headers safely", () => {
 		protocol: "http",
 		serviceName: "test-service",
 		rootPrefix: "",
-		ignoredTypes: "",
-		propagateHeadersTypes: "function",
+		ignoredNodeTypes: "",
+		propagateHeaderNodeTypes: "function",
 		logLevel: "off",
 		timeout: 10,
 		attributeMappings: [],
@@ -1200,8 +1219,8 @@ test("onReceive.otel hook sets otelRootMsgId for split nodes", () => {
 	const nodeInstance = { on: () => {}, status: () => {} };
 	const config = {
 		url: "http://localhost:4318/v1/traces",
-		ignoredTypes: "",
-		propagateHeadersTypes: "",
+		ignoredNodeTypes: "",
+		propagateHeaderNodeTypes: "",
 	};
 	NodeConstructor.call(nodeInstance, config);
 
@@ -1280,7 +1299,7 @@ test("node constructor applies defaults for missing optional config", async () =
 		{},
 		false,
 	);
-	assert.equal(startedSpans[0].name, "Message Function");
+	assert.equal(startedSpans[0].name, "Function");
 
 	const parentSpan = createFakeSpan("parent");
 	const spans = getMsgSpans();
@@ -1597,10 +1616,12 @@ test("runtime plugin onSettings does not leak lifecycle ref count", async () => 
 			protocol: "http",
 		},
 	});
-	assert.equal(getSharedState().refCount, 1);
+	assert.equal(getSharedState().refCount, 0);
+	assert.ok(getSharedState().provider);
 
 	await runtimePlugin.onClose();
 	assert.equal(getSharedState().refCount, 0);
+	assert.equal(getSharedState().provider, null);
 });
 
 test("runtime plugin onSettings updates runtime config without extra lifecycle ref", async () => {
@@ -1631,7 +1652,7 @@ test("runtime plugin onSettings updates runtime config without extra lifecycle r
 			timeout: 10,
 		},
 	});
-	assert.equal(getSharedState().refCount, 1);
+	assert.equal(getSharedState().refCount, 0);
 	assert.equal(getSharedState().logLevel, "warn");
 	assert.equal(getSharedState().timeout, 10000);
 
@@ -1642,7 +1663,7 @@ test("runtime plugin onSettings updates runtime config without extra lifecycle r
 			timeout: 3,
 		},
 	});
-	assert.equal(getSharedState().refCount, 1);
+	assert.equal(getSharedState().refCount, 0);
 	assert.equal(getSharedState().logLevel, "debug");
 	assert.equal(getSharedState().timeout, 3000);
 
@@ -1683,7 +1704,7 @@ test("runtime plugin onSettings reconfigures active providers", async () => {
 	assert.ok(getSharedState().provider);
 	assert.equal(getSharedState().meterProvider, null);
 	assert.equal(getSharedState().loggerProvider, null);
-	assert.equal(getSharedState().refCount, 1);
+	assert.equal(getSharedState().refCount, 0);
 
 	await runtimePlugin.onSettings({
 		opentelemetry: {
@@ -1699,10 +1720,71 @@ test("runtime plugin onSettings reconfigures active providers", async () => {
 	assert.equal(getSharedState().provider, null);
 	assert.ok(getSharedState().meterProvider);
 	assert.ok(getSharedState().loggerProvider);
-	assert.equal(getSharedState().refCount, 1);
+	assert.equal(getSharedState().refCount, 0);
 
 	await runtimePlugin.onClose();
 	assert.equal(getSharedState().refCount, 0);
+});
+
+test("runtime plugin onSettings is ignored when config node exists", async () => {
+	let NodeConstructor;
+	let runtimePlugin;
+	const mockRed = {
+		nodes: {
+			createNode: (node, config) => {
+				Object.assign(node, config);
+			},
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
+			},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+		plugins: {
+			registerRuntimePlugin: (plugin) => {
+				runtimePlugin = plugin;
+			},
+		},
+	};
+
+	otelModule(mockRed);
+	assert.ok(NodeConstructor);
+	assert.ok(runtimePlugin);
+
+	let closeHandler;
+	const nodeInstance = {
+		on: (event, handler) => {
+			if (event === "close") closeHandler = handler;
+		},
+	};
+
+	NodeConstructor.call(nodeInstance, {
+		url: "http://localhost:4318/v1/traces",
+		logLevel: "error",
+		timeout: 11,
+	});
+	assert.equal(getSharedState().logLevel, "error");
+	assert.equal(getSharedState().timeout, 11000);
+	assert.ok(getSharedState().provider);
+
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			logLevel: "debug",
+			timeout: 2,
+		},
+	});
+	assert.equal(getSharedState().logLevel, "error");
+	assert.equal(getSharedState().timeout, 11000);
+	assert.ok(getSharedState().provider);
+
+	await runtimePlugin.onClose();
+	assert.ok(getSharedState().provider);
+
+	await closeHandler.call(nodeInstance);
+	assert.equal(getSharedState().provider, null);
 });
 
 test("runtime plugin onSettings awaits provider shutdown before reconfigure", async () => {
@@ -1803,8 +1885,8 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 		protocol: "http",
 		serviceName: "test-service",
 		rootPrefix: "",
-		ignoredTypes: "",
-		propagateHeadersTypes: "",
+		ignoredNodeTypes: "",
+		propagateHeaderNodeTypes: "",
 		logLevel: "off",
 		timeout: 10,
 		attributeMappings: [],
@@ -1882,6 +1964,58 @@ test("node close waits for provider shutdown before invoking done", async () => 
 	assert.equal(doneCalled, true);
 });
 
+test("node close supports (removed, done) signature", async () => {
+	let NodeConstructor;
+	const mockRed = {
+		nodes: {
+			createNode: (node, config) => {
+				Object.assign(node, config);
+			},
+			registerType: (_name, nodeCtor) => {
+				NodeConstructor = nodeCtor;
+			},
+		},
+		hooks: {
+			add: () => {},
+			remove: () => {},
+		},
+	};
+	otelModule(mockRed);
+
+	let closeHandler;
+	let doneCalled = false;
+	const nodeInstance = {
+		on: (event, handler) => {
+			if (event === "close") closeHandler = handler;
+		},
+	};
+
+	NodeConstructor.call(nodeInstance, {
+		url: "http://localhost:4318/v1/traces",
+		tracesEnabled: true,
+		metricsEnabled: false,
+		logsEnabled: false,
+	});
+
+	const sharedState = getSharedState();
+	assert.ok(sharedState.provider);
+	let resolveShutdown;
+	sharedState.provider.shutdown = () =>
+		new Promise((resolve) => {
+			resolveShutdown = resolve;
+		});
+
+	const closePromise = closeHandler.call(nodeInstance, true, () => {
+		doneCalled = true;
+	});
+	await Promise.resolve();
+	assert.equal(doneCalled, false);
+
+	resolveShutdown();
+	await closePromise;
+	assert.equal(doneCalled, true);
+});
+
 test("endSpan should handle orphan spans from switch nodes", () => {
 	const tracer = {
 		startSpan: (name, options) => createFakeSpan(name, options),
@@ -1949,3 +2083,4 @@ test("endSpan keeps parent active when remaining child span is non-orphan", () =
 	assert.ok(parent);
 	assert.equal(parent.spans.has("active-child-msg#function-node-b"), true);
 });
+

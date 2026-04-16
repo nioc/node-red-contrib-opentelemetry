@@ -11,7 +11,7 @@ This project is a Node-RED module for OpenTelemetry (Traces, Metrics, Logs).
 
 ## Development Guidelines
 
-*   Source code is located in the `lib/` directory.
+*   Source code is located in the `src/` directory.
 *   Tests are in the `test/` directory.
 *   The project uses the built-in Node.js test runner (`node --test`).
 *   The command to run tests with a coverage report is `npm test -- --experimental-test-coverage`.

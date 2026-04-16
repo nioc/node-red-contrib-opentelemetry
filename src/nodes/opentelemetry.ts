@@ -59,7 +59,7 @@ import {
 	ATTR_HOST_NAME,
 } from "@opentelemetry/semantic-conventions/incubating";
 import jmespath from "jmespath";
-import { name, version } from "../package.json";
+import { name, version } from "../../package.json";
 
 /**
  * @typedef {import('@opentelemetry/api').Tracer} Tracer
@@ -109,8 +109,8 @@ interface OTELConfig {
 	metricsEnabled?: boolean;
 	logsEnabled?: boolean;
 	rootPrefix?: string;
-	ignoredTypes?: string;
-	propagateHeadersTypes?: string;
+	ignoredNodeTypes?: string;
+	propagateHeaderNodeTypes?: string;
 	logLevel?: string;
 	timeout?: number;
 	attributeMappings?: AttributeMapping[];
@@ -138,8 +138,8 @@ interface ResolvedOTELConfig {
 	metricsEnabled: boolean;
 	logsEnabled: boolean;
 	rootPrefix: string;
-	ignoredTypes: string;
-	propagateHeadersTypes: string;
+	ignoredNodeTypes: string;
+	propagateHeaderNodeTypes: string;
 	logLevel: "off" | "error" | "warn" | "info" | "debug";
 	timeout: number;
 	attributeMappings: AttributeMapping[];
@@ -220,8 +220,8 @@ interface SharedState {
 	rootPrefix: string;
 	timeout: number;
 	attributeMappings: AttributeMapping[];
-	ignoredTypesList: string[];
-	propagateHeadersTypesList: string[];
+	ignoredNodeTypesList: string[];
+	propagateHeaderNodeTypesList: string[];
 	tracer: Tracer | null;
 	provider: BasicTracerProvider | null;
 	meterProvider: MeterProvider | null;
@@ -232,6 +232,7 @@ interface SharedState {
 	};
 	intervalId: NodeJS.Timeout | null;
 	refCount: number;
+	hooksRegistered: boolean;
 }
 
 // Shared state for all node instances
@@ -240,8 +241,8 @@ const sharedState: SharedState = {
 	rootPrefix: "",
 	timeout: 10_000,
 	attributeMappings: [],
-	ignoredTypesList: [],
-	propagateHeadersTypesList: [],
+	ignoredNodeTypesList: [],
+	propagateHeaderNodeTypesList: [],
 	tracer: null,
 	provider: null, // Trace provider
 	meterProvider: null,
@@ -252,6 +253,7 @@ const sharedState: SharedState = {
 	},
 	intervalId: null,
 	refCount: 0,
+	hooksRegistered: false,
 };
 
 const DEFAULT_OTEL_TRACE_URL = "http://localhost:4318/v1/traces";
@@ -259,9 +261,9 @@ const DEFAULT_OTEL_METRICS_URL = "http://localhost:4318/v1/metrics";
 const DEFAULT_OTEL_LOGS_URL = "http://localhost:4318/v1/logs";
 const DEFAULT_OTEL_PROTOCOL = "http";
 const DEFAULT_OTEL_SERVICE_NAME = "Node-RED";
-const DEFAULT_ROOT_PREFIX = "Message ";
-const DEFAULT_IGNORED_TYPES = "debug,catch";
-const DEFAULT_PROPAGATE_HEADERS_TYPES = "";
+const DEFAULT_ROOT_SPAN_NAME_PREFIX = "";
+const DEFAULT_IGNORED_NODE_TYPES = "debug,catch";
+const DEFAULT_PROPAGATE_HEADER_NODE_TYPES = "";
 const DEFAULT_LOG_LEVEL = "warn";
 const DEFAULT_TIMEOUT_SECONDS = 10;
 
@@ -403,7 +405,8 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 	const logsProtocolEnv = env.OTEL_EXPORTER_OTLP_LOGS_PROTOCOL;
 	const genericProtocol = env.OTEL_EXPORTER_OTLP_PROTOCOL;
 	const serviceNameEnv = env.OTEL_SERVICE_NAME;
-	const logLevelEnv = env.NODE_RED_OTEL_LOG_LEVEL || env.OTEL_LOG_LEVEL;
+	const logLevelEnv = env.OTEL_LOG_LEVEL;
+	const ignoredNodeTypesEnv = env.IGNORED_NODE_TYPES;
 
 	const resolvedTracesProtocol = resolveProtocol(
 		tracesProtocolEnv || genericProtocol,
@@ -424,6 +427,9 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 		!config.protocol || config.protocol === DEFAULT_OTEL_PROTOCOL;
 	const useEnvServiceName =
 		!config.serviceName || config.serviceName === DEFAULT_OTEL_SERVICE_NAME;
+	const useEnvIgnoredNodeTypes =
+		!config.ignoredNodeTypes ||
+		config.ignoredNodeTypes === DEFAULT_IGNORED_NODE_TYPES;
 
 	const selectedTraceEndpoint =
 		useEnvTraceUrl && (tracesEndpoint || genericEndpoint)
@@ -512,10 +518,13 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 		tracesEnabled: config.tracesEnabled ?? true,
 		metricsEnabled: config.metricsEnabled ?? false,
 		logsEnabled: config.logsEnabled ?? false,
-		rootPrefix: config.rootPrefix ?? DEFAULT_ROOT_PREFIX,
-		ignoredTypes: config.ignoredTypes ?? DEFAULT_IGNORED_TYPES,
-		propagateHeadersTypes:
-			config.propagateHeadersTypes ?? DEFAULT_PROPAGATE_HEADERS_TYPES,
+		rootPrefix: config.rootPrefix ?? DEFAULT_ROOT_SPAN_NAME_PREFIX,
+		ignoredNodeTypes:
+			useEnvIgnoredNodeTypes && ignoredNodeTypesEnv
+				? ignoredNodeTypesEnv
+				: config.ignoredNodeTypes ?? DEFAULT_IGNORED_NODE_TYPES,
+		propagateHeaderNodeTypes:
+			config.propagateHeaderNodeTypes ?? DEFAULT_PROPAGATE_HEADER_NODE_TYPES,
 		logLevel: configuredLogLevel,
 		timeout: config.timeout ?? DEFAULT_TIMEOUT_SECONDS,
 		attributeMappings: config.attributeMappings ?? [],
@@ -1356,9 +1365,9 @@ function applyResolvedRuntimeConfig(resolvedConfig: ResolvedOTELConfig): void {
 	sharedState.attributeMappings = sanitizeAttributeMappings(
 		resolvedConfig.attributeMappings,
 	);
-	sharedState.ignoredTypesList = splitCsv(resolvedConfig.ignoredTypes);
-	sharedState.propagateHeadersTypesList = splitCsv(
-		resolvedConfig.propagateHeadersTypes,
+	sharedState.ignoredNodeTypesList = splitCsv(resolvedConfig.ignoredNodeTypes);
+	sharedState.propagateHeaderNodeTypesList = splitCsv(
+		resolvedConfig.propagateHeaderNodeTypes,
 	);
 }
 
@@ -1367,6 +1376,12 @@ function createCommonResource(serviceName: string): Resource {
 		[ATTR_SERVICE_NAME]: serviceName,
 		[ATTR_HOST_NAME]: os.hostname(),
 	});
+}
+
+function isAlreadyRegisteredError(error: unknown): boolean {
+	const message =
+		error instanceof Error ? error.message : error ? String(error) : "";
+	return /already\s+registered/i.test(message);
 }
 
 function initializeTracerProvider(
@@ -1394,7 +1409,15 @@ function initializeTracerProvider(
 		resource: commonResource,
 		spanProcessors: [spanProcessor],
 	});
-	const tracerRegistered = trace.setGlobalTracerProvider(provider);
+	let tracerRegistered = true;
+	try {
+		tracerRegistered = trace.setGlobalTracerProvider(provider);
+	} catch (error) {
+		if (!isAlreadyRegisteredError(error)) {
+			throw error;
+		}
+		tracerRegistered = false;
+	}
 	if (!tracerRegistered) {
 		consoleLog(
 			"warn",
@@ -1436,7 +1459,15 @@ function initializeMeterProvider(
 		resource: commonResource,
 		readers: [metricReader],
 	});
-	const meterRegistered = metrics.setGlobalMeterProvider(meterProvider);
+	let meterRegistered = true;
+	try {
+		meterRegistered = metrics.setGlobalMeterProvider(meterProvider);
+	} catch (error) {
+		if (!isAlreadyRegisteredError(error)) {
+			throw error;
+		}
+		meterRegistered = false;
+	}
 	if (!meterRegistered) {
 		consoleLog(
 			"warn",
@@ -1481,7 +1512,15 @@ function initializeLoggerProvider(
 		resource: commonResource,
 		processors: [new BatchLogRecordProcessor(logExporter)],
 	});
-	const selectedLoggerProvider = logs.setGlobalLoggerProvider(loggerProvider);
+	let selectedLoggerProvider: unknown;
+	try {
+		selectedLoggerProvider = logs.setGlobalLoggerProvider(loggerProvider);
+	} catch (error) {
+		if (!isAlreadyRegisteredError(error)) {
+			throw error;
+		}
+		selectedLoggerProvider = logs.getLoggerProvider();
+	}
 	if (selectedLoggerProvider !== loggerProvider) {
 		consoleLog(
 			"warn",
@@ -1509,7 +1548,9 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 					event.msg,
 					event.source?.node as RuntimeNodeDef,
 					null,
-					sharedState.ignoredTypesList.includes(event.source?.node.type ?? ""),
+					sharedState.ignoredNodeTypesList.includes(
+						event.source?.node.type ?? "",
+					),
 				);
 			}
 		});
@@ -1518,7 +1559,9 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 	RED.hooks.add("preDeliver.otel", (sendEvent: RuntimeHookEvent) => {
 		if (
 			sendEvent.source?.node &&
-			sharedState.propagateHeadersTypesList.includes(sendEvent.source.node.type)
+			sharedState.propagateHeaderNodeTypesList.includes(
+				sendEvent.source.node.type,
+			)
 		) {
 			if (!sendEvent.msg.headers) {
 				sendEvent.msg.headers = {};
@@ -1541,12 +1584,14 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 			sendEvent.msg,
 			sendEvent.destination.node,
 			null,
-			sharedState.ignoredTypesList.includes(sendEvent.destination.node.type),
+			sharedState.ignoredNodeTypesList.includes(
+				sendEvent.destination.node.type,
+			),
 		);
 		if (
 			span &&
 			sendEvent.destination.node &&
-			sharedState.propagateHeadersTypesList.includes(
+			sharedState.propagateHeaderNodeTypesList.includes(
 				sendEvent.destination.node.type,
 			)
 		) {
@@ -1636,6 +1681,7 @@ async function shutdownSignalProviders(): Promise<void> {
  */
 module.exports = (RED: RuntimeApi) => {
 	let runtimePluginInitialized = false;
+	let activeConfigNodes = 0;
 	/**
 	 * Initialize the OpenTelemetry system. Can be called by the Plugin API or a Node instance.
 	 * @param {OTELConfig} config Optional configuration to override defaults
@@ -1660,7 +1706,13 @@ module.exports = (RED: RuntimeApi) => {
 				logsEnabled,
 			} = resolvedConfig;
 			applyResolvedRuntimeConfig(resolvedConfig);
-		if (!trackLifecycle && sharedState.refCount > 0) {
+		if (
+			!trackLifecycle &&
+			(sharedState.refCount > 0 ||
+				sharedState.provider ||
+				sharedState.meterProvider ||
+				sharedState.loggerProvider)
+		) {
 			await shutdownSignalProviders();
 		}
 		const commonResource = createCommonResource(serviceName);
@@ -1677,8 +1729,9 @@ module.exports = (RED: RuntimeApi) => {
 			metricsUrl,
 		);
 		initializeLoggerProvider(commonResource, logsEnabled, logsProtocol, logsUrl);
-		if (sharedState.refCount === 0) {
+		if (!sharedState.hooksRegistered) {
 			registerRuntimeHooks(RED);
+			sharedState.hooksRegistered = true;
 		}
 
 		if (trackLifecycle) {
@@ -1687,33 +1740,45 @@ module.exports = (RED: RuntimeApi) => {
 	}
 
 	async function stopOTEL(): Promise<void> {
-		sharedState.refCount--;
-		if (sharedState.refCount <= 0) {
-			if (sharedState.intervalId) {
-				clearInterval(sharedState.intervalId);
-				sharedState.intervalId = null;
-			}
+		if (sharedState.refCount > 0) {
+			sharedState.refCount--;
+		}
+		if (sharedState.refCount > 0) return;
+		if (sharedState.intervalId) {
+			clearInterval(sharedState.intervalId);
+			sharedState.intervalId = null;
+		}
+		if (sharedState.hooksRegistered) {
 			OTEL_HOOK_NAMES.forEach((hookName) => {
 				RED.hooks.remove(hookName);
 			});
-			msgSpans.clear();
-			completedHttpMetricsMsgIds.clear();
-			completedHttpResponseMsgIds.clear();
-			await shutdownSignalProviders();
-			sharedState.refCount = 0;
+			sharedState.hooksRegistered = false;
 		}
+		msgSpans.clear();
+		completedHttpMetricsMsgIds.clear();
+		completedHttpResponseMsgIds.clear();
+		await shutdownSignalProviders();
+		sharedState.refCount = 0;
 	}
 
-	// Register as a Node
+	// Register as a config Node
 	function OpenTelemetryNode(this: RedNodeInstance, config: OTELNodeDef) {
 		RED.nodes.createNode(this, config);
-		void initOTEL(config);
-		this.on("close", async (done: () => void) => {
-			await stopOTEL();
-			this.status({ fill: "red", shape: "ring", text: "deactivated" });
+		activeConfigNodes++;
+		void initOTEL(config, { trackLifecycle: false });
+		this.on("close", async (...args: unknown[]) => {
+			const done =
+				typeof args[0] === "function"
+					? (args[0] as () => void)
+					: typeof args[1] === "function"
+						? (args[1] as () => void)
+						: undefined;
+			activeConfigNodes = Math.max(activeConfigNodes - 1, 0);
+			if (activeConfigNodes === 0) {
+				await stopOTEL();
+			}
 			if (typeof done === "function") done();
 		});
-		this.status({ fill: "green", shape: "ring", text: "activated" });
 	}
 	RED.nodes.registerType("OpenTelemetry", OpenTelemetryNode);
 
@@ -1723,6 +1788,9 @@ module.exports = (RED: RuntimeApi) => {
 		RED.plugins.registerRuntimePlugin({
 			id: "opentelemetry-runtime",
 			onSettings: async (settings: unknown) => {
+				if (activeConfigNodes > 0) {
+					return;
+				}
 				let pluginConfig: OTELConfig = {};
 				// We can read from settings.js if needed
 				if (
@@ -1733,12 +1801,8 @@ module.exports = (RED: RuntimeApi) => {
 					const pluginSettings = settings as { opentelemetry?: OTELConfig };
 					pluginConfig = pluginSettings.opentelemetry ?? {};
 				}
-				if (!runtimePluginInitialized) {
-					await initOTEL(pluginConfig, { trackLifecycle: true });
-					runtimePluginInitialized = true;
-					return;
-				}
 				await initOTEL(pluginConfig, { trackLifecycle: false });
+				runtimePluginInitialized = true;
 			},
 			onClose: async () => {
 				if (!runtimePluginInitialized) {
@@ -1786,6 +1850,7 @@ module.exports.__test__ = {
 		sharedState.timeout = 10;
 		sharedState.attributeMappings = [];
 		sharedState.refCount = 0;
+		sharedState.hooksRegistered = false;
 		if (sharedState.intervalId) {
 			clearInterval(sharedState.intervalId);
 			sharedState.intervalId = null;
@@ -1794,7 +1859,18 @@ module.exports.__test__ = {
 			sharedState.provider.shutdown();
 			sharedState.provider = null;
 		}
+		if (sharedState.meterProvider) {
+			sharedState.meterProvider.shutdown();
+			sharedState.meterProvider = null;
+		}
+		if (sharedState.loggerProvider) {
+			sharedState.loggerProvider.shutdown();
+			sharedState.loggerProvider = null;
+		}
 		sharedState.tracer = null;
+		sharedState.logger = null;
+		sharedState.metrics.requestDuration = null;
 	},
 	getSharedState: () => sharedState,
 };
+

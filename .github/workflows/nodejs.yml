@@ -33,3 +33,5 @@ jobs:
         run: npm run test:cov
         env:
           CI: true
+      - name: pack-check
+        run: npm run pack:check

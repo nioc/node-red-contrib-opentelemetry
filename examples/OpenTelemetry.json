@@ -9,16 +9,14 @@
 	{
 		"id": "ac125c4c6d10643e",
 		"type": "OpenTelemetry",
-		"z": "f6f2187d.f172e8",
 		"name": "OTEL Config",
 		"url": "http://localhost:4318/v1/traces",
 		"serviceName": "Node-RED-Tracing-Demo",
 		"protocol": "http",
 		"rootPrefix": "Message ",
 		"timeout": 10,
-		"ignoredTypes": "debug,catch",
-		"propagateHeadersTypes": "http request",
-		"isLogging": false,
+		"ignoredNodeTypes": "debug,catch",
+		"propagateHeaderNodeTypes": "http request",
 		"attributeMappings": [
 			{
 				"isAfter": false,
@@ -27,10 +25,7 @@
 				"key": "http.method",
 				"path": "req.method"
 			}
-		],
-		"x": 140,
-		"y": 80,
-		"wires": []
+		]
 	},
 	{
 		"id": "1",
@@ -85,3 +80,4 @@
 		"wires": []
 	}
 ]
+
