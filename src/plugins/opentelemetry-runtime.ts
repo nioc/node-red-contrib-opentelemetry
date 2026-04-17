@@ -1854,12 +1854,7 @@ module.exports = (RED: RuntimeApi) => {
 			try {
 				let pluginConfig: OTELConfig = {};
 				if (typeof settings === "object" && settings !== null) {
-					if ("opentelemetry" in settings) {
-						const pluginSettings = settings as { opentelemetry?: OTELConfig };
-						pluginConfig = pluginSettings.opentelemetry ?? {};
-					} else {
-						pluginConfig = settings as OTELConfig;
-					}
+					pluginConfig = settings as OTELConfig;
 				}
 				await initOTEL(pluginConfig);
 				runtimePluginInitialized = true;
