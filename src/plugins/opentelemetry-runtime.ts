@@ -472,56 +472,28 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 		logsProtocolEnv || genericProtocol,
 	);
 
-	const useEnvTraceUrl = !config.url || config.url === DEFAULT_OTEL_TRACE_URL;
-	const useEnvMetricsUrl =
-		!config.metricsUrl || config.metricsUrl === DEFAULT_OTEL_METRICS_URL;
-	const useEnvLogsUrl =
-		!config.logsUrl || config.logsUrl === DEFAULT_OTEL_LOGS_URL;
-	const useEnvProtocol =
-		!config.protocol || config.protocol === DEFAULT_OTEL_PROTOCOL;
-	const useEnvServiceName =
-		!config.serviceName || config.serviceName === DEFAULT_OTEL_SERVICE_NAME;
-	const useEnvIgnoredNodeTypes =
-		!config.ignoredNodeTypes ||
-		config.ignoredNodeTypes === DEFAULT_IGNORED_NODE_TYPES;
-
 	const selectedTraceEndpoint =
-		useEnvTraceUrl && (tracesEndpoint || genericEndpoint)
-			? tracesEndpoint || genericEndpoint
-			: undefined;
+		tracesEndpoint || genericEndpoint || undefined;
 	const selectedMetricsEndpoint =
-		useEnvMetricsUrl && (metricsEndpoint || genericEndpoint)
-			? metricsEndpoint || genericEndpoint
-			: undefined;
+		metricsEndpoint || genericEndpoint || undefined;
 	const selectedLogsEndpoint =
-		useEnvLogsUrl && (logsEndpoint || genericEndpoint)
-			? logsEndpoint || genericEndpoint
-			: undefined;
+		logsEndpoint || genericEndpoint || undefined;
 
 	const isTraceGenericEndpoint = Boolean(
-		useEnvTraceUrl && !tracesEndpoint && genericEndpoint,
+		!tracesEndpoint && genericEndpoint,
 	);
 	const isMetricsGenericEndpoint = Boolean(
-		useEnvMetricsUrl && !metricsEndpoint && genericEndpoint,
+		!metricsEndpoint && genericEndpoint,
 	);
 	const isLogsGenericEndpoint = Boolean(
-		useEnvLogsUrl && !logsEndpoint && genericEndpoint,
+		!logsEndpoint && genericEndpoint,
 	);
 
 	const configuredProtocol =
 		resolveProtocol(config.protocol || DEFAULT_OTEL_PROTOCOL) || "http";
-	const tracesProtocol =
-		useEnvProtocol && resolvedTracesProtocol
-			? resolvedTracesProtocol
-			: configuredProtocol;
-	const metricsProtocol =
-		useEnvProtocol && resolvedMetricsProtocol
-			? resolvedMetricsProtocol
-			: configuredProtocol;
-	const logsProtocol =
-		useEnvProtocol && resolvedLogsProtocol
-			? resolvedLogsProtocol
-			: configuredProtocol;
+	const tracesProtocol = resolvedTracesProtocol || configuredProtocol;
+	const metricsProtocol = resolvedMetricsProtocol || configuredProtocol;
+	const logsProtocol = resolvedLogsProtocol || configuredProtocol;
 	const configuredLogLevel =
 		resolveLogLevel(config.logLevel) ||
 		resolveLogLevel(logLevelEnv) ||
@@ -565,18 +537,13 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 		tracesProtocol,
 		metricsProtocol,
 		logsProtocol,
-		serviceName:
-			useEnvServiceName && serviceNameEnv
-				? serviceNameEnv
-				: config.serviceName || DEFAULT_OTEL_SERVICE_NAME,
+		serviceName: serviceNameEnv || config.serviceName || DEFAULT_OTEL_SERVICE_NAME,
 		tracesEnabled: config.tracesEnabled ?? true,
 		metricsEnabled: config.metricsEnabled ?? false,
 		logsEnabled: config.logsEnabled ?? false,
 		rootPrefix: config.rootPrefix ?? DEFAULT_ROOT_SPAN_NAME_PREFIX,
 		ignoredNodeTypes:
-			useEnvIgnoredNodeTypes && ignoredNodeTypesEnv
-				? ignoredNodeTypesEnv
-				: config.ignoredNodeTypes ?? DEFAULT_IGNORED_NODE_TYPES,
+			ignoredNodeTypesEnv || config.ignoredNodeTypes || DEFAULT_IGNORED_NODE_TYPES,
 		propagateHeaderNodeTypes:
 			config.propagateHeaderNodeTypes ?? DEFAULT_PROPAGATE_HEADER_NODE_TYPES,
 		logLevel: configuredLogLevel,
