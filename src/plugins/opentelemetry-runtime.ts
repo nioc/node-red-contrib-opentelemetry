@@ -129,9 +129,9 @@ interface ResolvedOTELConfig {
 	metricsUrl?: string;
 	logsUrl?: string;
 	protocol: string;
-	tracesProtocol: "proto" | "http";
-	metricsProtocol: "proto" | "http";
-	logsProtocol: "proto" | "http";
+	tracesProtocol: "grpc" | "proto" | "http";
+	metricsProtocol: "grpc" | "proto" | "http";
+	logsProtocol: "grpc" | "proto" | "http";
 	serviceName: string;
 	tracesEnabled: boolean;
 	metricsEnabled: boolean;
@@ -260,6 +260,7 @@ const sharedState: SharedState = {
 const DEFAULT_OTEL_TRACE_URL = "http://localhost:4318/v1/traces";
 const DEFAULT_OTEL_METRICS_URL = "http://localhost:4318/v1/metrics";
 const DEFAULT_OTEL_LOGS_URL = "http://localhost:4318/v1/logs";
+const DEFAULT_OTEL_GRPC_URL = "http://localhost:4317";
 const DEFAULT_OTEL_PROTOCOL = "http";
 const DEFAULT_OTEL_SERVICE_NAME = "Node-RED";
 const DEFAULT_ROOT_SPAN_NAME_PREFIX = "";
@@ -320,11 +321,13 @@ function parseNodeUrl(
 
 function resolveProtocol(
 	value: string | undefined,
-): "proto" | "http" | undefined {
+): "grpc" | "proto" | "http" | undefined {
 	const normalized = String(value ?? "")
 		.trim()
 		.toLowerCase();
 	switch (normalized) {
+		case "grpc":
+			return "grpc";
 		case "http/protobuf":
 		case "protobuf":
 		case "proto":
@@ -352,6 +355,32 @@ function resolveLogLevel(value: string | undefined): LogLevel | undefined {
 		default:
 			return undefined;
 	}
+}
+
+function parseExporterEnv(value: string | undefined): string[] {
+	if (value === undefined) {
+		return [];
+	}
+	return String(value)
+		.split(",")
+		.map((item) => item.trim().toLowerCase())
+		.filter((item) => item.length > 0);
+}
+
+function resolveSignalEnabledFromEnv(
+	exporterEnv: string | undefined,
+): boolean | undefined {
+	const exporters = parseExporterEnv(exporterEnv);
+	if (exporters.length === 0) {
+		return undefined;
+	}
+	if (exporters.includes("none")) {
+		return false;
+	}
+	if (exporters.includes("otlp")) {
+		return true;
+	}
+	return false;
 }
 
 function shouldLog(requiredLevel: LogLevel): boolean {
@@ -461,6 +490,9 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 	const serviceNameEnv = env.OTEL_SERVICE_NAME;
 	const logLevelEnv = env.OTEL_LOG_LEVEL;
 	const ignoredNodeTypesEnv = env.IGNORED_NODE_TYPES;
+	const tracesExporterEnv = env.OTEL_TRACES_EXPORTER;
+	const metricsExporterEnv = env.OTEL_METRICS_EXPORTER;
+	const logsExporterEnv = env.OTEL_LOGS_EXPORTER;
 
 	const resolvedTracesProtocol = resolveProtocol(
 		tracesProtocolEnv || genericProtocol,
@@ -510,37 +542,69 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 		config.logsUrl || DEFAULT_OTEL_LOGS_URL,
 		"/v1/logs",
 	);
+	const tracesEnabledFromEnv = resolveSignalEnabledFromEnv(tracesExporterEnv);
+	const metricsEnabledFromEnv = resolveSignalEnabledFromEnv(metricsExporterEnv);
+	const logsEnabledFromEnv = resolveSignalEnabledFromEnv(logsExporterEnv);
+	const hasMetricsOtlpEnvConfig = Boolean(selectedMetricsEndpoint);
+	const hasLogsOtlpEnvConfig = Boolean(selectedLogsEndpoint);
+	const configuredTraceEndpointForProtocol =
+		tracesProtocol === "grpc"
+			? config.url || DEFAULT_OTEL_GRPC_URL
+			: configuredTraceUrl;
+	const configuredMetricsEndpointForProtocol =
+		metricsProtocol === "grpc"
+			? config.metricsUrl || config.url || DEFAULT_OTEL_GRPC_URL
+			: configuredMetricsUrl;
+	const configuredLogsEndpointForProtocol =
+		logsProtocol === "grpc"
+			? config.logsUrl || config.url || DEFAULT_OTEL_GRPC_URL
+			: configuredLogsUrl;
 
 	return {
 		url: selectedTraceEndpoint
-			? ensureSignalPath(
+			? tracesProtocol === "grpc"
+				? selectedTraceEndpoint
+				: ensureSignalPath(
 					selectedTraceEndpoint,
 					"/v1/traces",
 					isTraceGenericEndpoint,
 				)
-			: configuredTraceUrl,
+			: configuredTraceEndpointForProtocol,
 		metricsUrl: selectedMetricsEndpoint
-			? ensureSignalPath(
+			? metricsProtocol === "grpc"
+				? selectedMetricsEndpoint
+				: ensureSignalPath(
 					selectedMetricsEndpoint,
 					"/v1/metrics",
 					isMetricsGenericEndpoint,
 				)
-			: configuredMetricsUrl,
+			: configuredMetricsEndpointForProtocol,
 		logsUrl: selectedLogsEndpoint
-			? ensureSignalPath(
+			? logsProtocol === "grpc"
+				? selectedLogsEndpoint
+				: ensureSignalPath(
 					selectedLogsEndpoint,
 					"/v1/logs",
 					isLogsGenericEndpoint,
 				)
-			: configuredLogsUrl,
+			: configuredLogsEndpointForProtocol,
 		protocol: tracesProtocol,
 		tracesProtocol,
 		metricsProtocol,
 		logsProtocol,
 		serviceName: serviceNameEnv || config.serviceName || DEFAULT_OTEL_SERVICE_NAME,
-		tracesEnabled: config.tracesEnabled ?? true,
-		metricsEnabled: config.metricsEnabled ?? false,
-		logsEnabled: config.logsEnabled ?? false,
+		tracesEnabled:
+			tracesEnabledFromEnv ??
+			config.tracesEnabled ??
+			true,
+		metricsEnabled:
+			metricsEnabledFromEnv ??
+			config.metricsEnabled ??
+			(hasMetricsOtlpEnvConfig ? true : false),
+		logsEnabled:
+			logsEnabledFromEnv ??
+			config.logsEnabled ??
+			(hasLogsOtlpEnvConfig ? true : false),
 		rootPrefix: config.rootPrefix ?? DEFAULT_ROOT_SPAN_NAME_PREFIX,
 		ignoredNodeTypes:
 			ignoredNodeTypesEnv ??
@@ -1410,14 +1474,19 @@ function isAlreadyRegisteredError(error: unknown): boolean {
 function initializeTracerProvider(
 	commonResource: Resource,
 	tracesEnabled: boolean,
-	tracesProtocol: "proto" | "http",
+	tracesProtocol: "grpc" | "proto" | "http",
 	url: string | undefined,
 ): void {
 	if (sharedState.provider || !tracesEnabled || !url) {
 		return;
 	}
 	let spanProcessor: BatchSpanProcessor;
-	if (tracesProtocol === "proto") {
+	if (tracesProtocol === "grpc") {
+		const {
+			OTLPTraceExporter,
+		} = require("@opentelemetry/exporter-trace-otlp-grpc");
+		spanProcessor = new BatchSpanProcessor(new OTLPTraceExporter({ url }));
+	} else if (tracesProtocol === "proto") {
 		const {
 			OTLPTraceExporter,
 		} = require("@opentelemetry/exporter-trace-otlp-proto");
@@ -1454,14 +1523,21 @@ function initializeTracerProvider(
 function initializeMeterProvider(
 	commonResource: Resource,
 	metricsEnabled: boolean,
-	metricsProtocol: "proto" | "http",
+	metricsProtocol: "grpc" | "proto" | "http",
 	metricsUrl: string | undefined,
 ): void {
 	if (sharedState.meterProvider || !metricsEnabled || !metricsUrl) {
 		return;
 	}
 	const metricExporter =
-		metricsProtocol === "proto"
+		metricsProtocol === "grpc"
+			? (() => {
+					const {
+						OTLPMetricExporter,
+					} = require("@opentelemetry/exporter-metrics-otlp-grpc");
+					return new OTLPMetricExporter({ url: metricsUrl });
+				})()
+			: metricsProtocol === "proto"
 			? (() => {
 					const {
 						OTLPMetricExporter,
@@ -1511,14 +1587,21 @@ function initializeMeterProvider(
 function initializeLoggerProvider(
 	commonResource: Resource,
 	logsEnabled: boolean,
-	logsProtocol: "proto" | "http",
+	logsProtocol: "grpc" | "proto" | "http",
 	logsUrl: string | undefined,
 ): void {
 	if (sharedState.loggerProvider || !logsEnabled || !logsUrl) {
 		return;
 	}
 	const logExporter =
-		logsProtocol === "proto"
+		logsProtocol === "grpc"
+			? (() => {
+					const {
+						OTLPLogExporter,
+					} = require("@opentelemetry/exporter-logs-otlp-grpc");
+					return new OTLPLogExporter({ url: logsUrl });
+				})()
+			: logsProtocol === "proto"
 			? (() => {
 					const {
 						OTLPLogExporter,
