@@ -69,6 +69,7 @@ module.exports = {
     tracesEnabled: true,
     metricsEnabled: false,
     logsEnabled: false,
+    flowEventLogsEnabled: true,
     rootPrefix: "",
     ignoredNodeTypes: "debug,catch",
     propagateHeaderNodeTypes: "http request,mqtt out",
@@ -94,6 +95,7 @@ Config fields (`settings.js` -> `opentelemetry`):
 -   **metricsUrl**: OTLP metrics endpoint (e.g., `http://localhost:4318/v1/metrics`).
 -   **logsUrl**: OTLP logs endpoint (e.g., `http://localhost:4318/v1/logs`).
 -   **tracesEnabled / metricsEnabled / logsEnabled**: Enable/disable signals independently.
+-   **flowEventLogsEnabled**: Enable/disable flow hook event logs (`onSend`, `preDeliver`, etc.) while keeping runtime logger forwarding.
 -   **protocol**: `http` (json) or `proto` (protobuf).
 -   **serviceName**: Service name shown in your telemetry backend.
 -   **rootPrefix**: Optional prefix for root span names.

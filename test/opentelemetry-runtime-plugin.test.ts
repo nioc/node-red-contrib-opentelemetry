@@ -559,6 +559,17 @@ test("logEvent emits structured OTel logs even when console log level is warn", 
 	assert.equal(emitSpy.mock.calls.length, 1);
 });
 
+test("logEvent can disable flow event logs independently from runtime logs", () => {
+	setLogLevel("warn");
+	const logger = { emit: () => {} };
+	const emitSpy = test.mock.method(logger, "emit");
+	const sharedState = getSharedState();
+	sharedState.logger = logger;
+	sharedState.flowEventLogsEnabled = false;
+	logEvent(mockRed, {}, "test", { msg: { _msgid: "1" } });
+	assert.equal(emitSpy.mock.calls.length, 0);
+});
+
 test("createSpan should handle various node types correctly", () => {
 	const tracer = {
 		startSpan: (name, options) => createFakeSpan(name, options),
@@ -1429,6 +1440,31 @@ test("runtime plugin forwards Node-RED runtime logs to OTel logger", async () =>
 	await runtimePlugin.onClose();
 });
 
+test("runtime plugin maps numeric Node-RED levels to OTel severity", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			logsEnabled: true,
+			logsUrl: "http://localhost:4318/v1/logs",
+			tracesEnabled: false,
+			metricsEnabled: false,
+			logLevel: "off",
+		},
+	});
+	const logger = getSharedState().logger;
+	assert.ok(logger);
+	const emitSpy = test.mock.method(logger, "emit");
+	nodeRedUtilStub.log.emit({
+		level: nodeRedUtilStub.log.ERROR,
+		msg: "numeric level",
+		type: "runtime",
+	});
+	assert.equal(emitSpy.mock.calls.length, 1);
+	assert.equal(emitSpy.mock.calls[0].arguments[0].severityText, "ERROR");
+	await runtimePlugin.onClose();
+});
+
 test("runtime plugin shutdown should not disable global OpenTelemetry APIs", async () => {
 	const { runtimePlugin } = createPluginHarness(false);
 	assert.ok(runtimePlugin);
@@ -1506,19 +1542,23 @@ test("runtime plugin onSettings updates runtime config", async () => {
 		opentelemetry: {
 			url: "http://localhost:4318/v1/traces",
 			logLevel: "warn",
+			flowEventLogsEnabled: false,
 			timeout: 10,
 		},
 	});
 	assert.equal(getSharedState().logLevel, "warn");
+	assert.equal(getSharedState().flowEventLogsEnabled, false);
 	assert.equal(getSharedState().timeout, 10000);
 	await runtimePlugin.onSettings({
 		opentelemetry: {
 			url: "http://localhost:4318/v1/traces",
 			logLevel: "debug",
+			flowEventLogsEnabled: true,
 			timeout: 3,
 		},
 	});
 	assert.equal(getSharedState().logLevel, "debug");
+	assert.equal(getSharedState().flowEventLogsEnabled, true);
 	assert.equal(getSharedState().timeout, 3000);
 	await runtimePlugin.onClose();
 });

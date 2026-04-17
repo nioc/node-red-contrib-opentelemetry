@@ -3,14 +3,14 @@ const handlers = new Set();
 module.exports = {
 	log: {
 		log: () => {},
-		INFO: "info",
-		ERROR: "error",
-		WARN: "warn",
-		DEBUG: "debug",
-		TRACE: "trace",
-		FATAL: "fatal",
-		AUDIT: "audit",
-		METRIC: "metric",
+		FATAL: 10,
+		ERROR: 20,
+		WARN: 30,
+		INFO: 40,
+		DEBUG: 50,
+		TRACE: 60,
+		AUDIT: 98,
+		METRIC: 99,
 		addHandler: (handler) => {
 			handlers.add(handler);
 		},

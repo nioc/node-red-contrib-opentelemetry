@@ -108,6 +108,7 @@ interface OTELConfig {
 	tracesEnabled?: boolean;
 	metricsEnabled?: boolean;
 	logsEnabled?: boolean;
+	flowEventLogsEnabled?: boolean;
 	rootPrefix?: string;
 	ignoredNodeTypes?: string;
 	propagateHeaderNodeTypes?: string;
@@ -137,6 +138,7 @@ interface ResolvedOTELConfig {
 	tracesEnabled: boolean;
 	metricsEnabled: boolean;
 	logsEnabled: boolean;
+	flowEventLogsEnabled: boolean;
 	rootPrefix: string;
 	ignoredNodeTypes: string;
 	propagateHeaderNodeTypes: string;
@@ -259,6 +261,7 @@ interface SharedState {
 	hooksRegistered: boolean;
 	nodeRedLogApi: NodeRedUtilLogApi | null;
 	nodeRedLogHandler: EventEmitter | null;
+	flowEventLogsEnabled: boolean;
 }
 
 // Shared state for all node instances
@@ -281,6 +284,7 @@ const sharedState: SharedState = {
 	hooksRegistered: false,
 	nodeRedLogApi: null,
 	nodeRedLogHandler: null,
+	flowEventLogsEnabled: true,
 };
 
 const DEFAULT_OTEL_TRACE_URL = "http://localhost:4318/v1/traces";
@@ -532,45 +536,46 @@ function resolveNodeRedSeverity(
 	level: unknown,
 	logApi: NodeRedUtilLogApi | null,
 ): { severityNumber: SeverityNumber; severityText: string } {
-	const normalizedLevel = String(level ?? "").trim().toLowerCase();
-	if (normalizedLevel) {
-		switch (normalizedLevel) {
-			case "fatal":
-				return { severityNumber: SeverityNumber.FATAL, severityText: "FATAL" };
-			case "error":
-				return { severityNumber: SeverityNumber.ERROR, severityText: "ERROR" };
-			case "warn":
-			case "warning":
-				return { severityNumber: SeverityNumber.WARN, severityText: "WARN" };
-			case "debug":
-				return { severityNumber: SeverityNumber.DEBUG, severityText: "DEBUG" };
-			case "trace":
-				return { severityNumber: SeverityNumber.TRACE, severityText: "TRACE" };
-			case "audit":
-			case "metric":
-			case "info":
-			default:
-				return { severityNumber: SeverityNumber.INFO, severityText: "INFO" };
-		}
-	}
 	if (level !== undefined && logApi) {
-		if (level === logApi.FATAL) {
+		const numericLevel =
+			typeof level === "string" && /^\d+$/u.test(level.trim())
+				? Number(level)
+				: level;
+		if (numericLevel === logApi.FATAL) {
 			return { severityNumber: SeverityNumber.FATAL, severityText: "FATAL" };
 		}
-		if (level === logApi.ERROR) {
+		if (numericLevel === logApi.ERROR) {
 			return { severityNumber: SeverityNumber.ERROR, severityText: "ERROR" };
 		}
-		if (level === logApi.WARN) {
+		if (numericLevel === logApi.WARN) {
 			return { severityNumber: SeverityNumber.WARN, severityText: "WARN" };
 		}
-		if (level === logApi.DEBUG) {
+		if (numericLevel === logApi.DEBUG) {
 			return { severityNumber: SeverityNumber.DEBUG, severityText: "DEBUG" };
 		}
-		if (level === logApi.TRACE) {
+		if (numericLevel === logApi.TRACE) {
 			return { severityNumber: SeverityNumber.TRACE, severityText: "TRACE" };
 		}
 	}
-	return { severityNumber: SeverityNumber.INFO, severityText: "INFO" };
+	const normalizedLevel = String(level ?? "").trim().toLowerCase();
+	switch (normalizedLevel) {
+		case "fatal":
+			return { severityNumber: SeverityNumber.FATAL, severityText: "FATAL" };
+		case "error":
+			return { severityNumber: SeverityNumber.ERROR, severityText: "ERROR" };
+		case "warn":
+		case "warning":
+			return { severityNumber: SeverityNumber.WARN, severityText: "WARN" };
+		case "debug":
+			return { severityNumber: SeverityNumber.DEBUG, severityText: "DEBUG" };
+		case "trace":
+			return { severityNumber: SeverityNumber.TRACE, severityText: "TRACE" };
+		case "audit":
+		case "metric":
+		case "info":
+		default:
+			return { severityNumber: SeverityNumber.INFO, severityText: "INFO" };
+	}
 }
 
 function emitNodeRedRuntimeLog(entry: NodeRedLogEntry): void {
@@ -692,6 +697,7 @@ function formatStartupConfigSummary(config: ResolvedOTELConfig): string {
 		`metricsProtocol=${String(config.metricsProtocol)}`,
 		`metricsUrl=${metricsUrl}`,
 		`logsEnabled=${String(config.logsEnabled)}`,
+		`flowEventLogsEnabled=${String(config.flowEventLogsEnabled)}`,
 		`logsProtocol=${String(config.logsProtocol)}`,
 		`logsUrl=${logsUrl}`,
 		`rootPrefix=${String(config.rootPrefix)}`,
@@ -840,6 +846,7 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 			logsEnabledFromEnv ??
 			config.logsEnabled ??
 			(hasLogsOtlpEnvConfig ? true : false),
+		flowEventLogsEnabled: config.flowEventLogsEnabled ?? true,
 		rootPrefix: config.rootPrefix ?? DEFAULT_ROOT_SPAN_NAME_PREFIX,
 		ignoredNodeTypes:
 			ignoredNodeTypesEnv ??
@@ -1070,7 +1077,7 @@ function logEvent(
 	const emitConsole = shouldLog("debug");
 	// Structured OTel logs follow the logs signal enablement (logger presence),
 	// while logLevel controls plugin diagnostics written to console.
-	const emitOtelLogger = sharedState.logger;
+	const emitOtelLogger = sharedState.logger && sharedState.flowEventLogsEnabled;
 	if (!emitConsole && !emitOtelLogger) {
 		return;
 	}
@@ -1693,6 +1700,7 @@ function applyResolvedRuntimeConfig(resolvedConfig: ResolvedOTELConfig): void {
 	sharedState.propagateHeaderNodeTypesList = splitCsv(
 		resolvedConfig.propagateHeaderNodeTypes,
 	);
+	sharedState.flowEventLogsEnabled = resolvedConfig.flowEventLogsEnabled;
 }
 
 function createCommonResource(serviceName: string): Resource {
@@ -2226,6 +2234,7 @@ module.exports.__test__ = {
 		unregisterNodeRedLogHandler();
 		sharedState.nodeRedLogApi = null;
 		sharedState.logLevel = DEFAULT_LOG_LEVEL;
+		sharedState.flowEventLogsEnabled = true;
 		sharedState.rootPrefix = "";
 		sharedState.timeout = 10;
 		sharedState.attributeMappings = [];
