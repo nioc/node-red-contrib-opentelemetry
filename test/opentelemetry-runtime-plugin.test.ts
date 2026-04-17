@@ -238,6 +238,18 @@ test("resolveOpenTelemetryConfig supports per-signal protocol env overrides", ()
 	assert.equal(config.protocol, "proto");
 });
 
+test("resolveOpenTelemetryConfig supports grpc OTEL protocol and keeps generic endpoint as-is", () => {
+	process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://collector:4317";
+	process.env.OTEL_EXPORTER_OTLP_PROTOCOL = "grpc";
+	const config = resolveOpenTelemetryConfig({});
+	assert.equal(config.tracesProtocol, "grpc");
+	assert.equal(config.metricsProtocol, "grpc");
+	assert.equal(config.logsProtocol, "grpc");
+	assert.equal(config.url, "http://collector:4317");
+	assert.equal(config.metricsUrl, "http://collector:4317");
+	assert.equal(config.logsUrl, "http://collector:4317");
+});
+
 test("resolveOpenTelemetryConfig reads log level from env variable", () => {
 	process.env.OTEL_LOG_LEVEL = "debug";
 	const config = resolveOpenTelemetryConfig({});
@@ -303,6 +315,28 @@ test("resolveOpenTelemetryConfig keeps malformed env endpoint without throwing",
 	assert.equal(config.url, "http://[::1");
 	assert.equal(config.metricsUrl, "http://[::1");
 	assert.equal(config.logsUrl, "http://[::1");
+});
+
+test("resolveOpenTelemetryConfig enables metrics and logs when OTLP endpoint env is provided", () => {
+	process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://collector:4318";
+	const config = resolveOpenTelemetryConfig({});
+	assert.equal(config.tracesEnabled, true);
+	assert.equal(config.metricsEnabled, true);
+	assert.equal(config.logsEnabled, true);
+});
+
+test("resolveOpenTelemetryConfig respects OTEL_*_EXPORTER none to disable signals", () => {
+	process.env.OTEL_TRACES_EXPORTER = "none";
+	process.env.OTEL_METRICS_EXPORTER = "none";
+	process.env.OTEL_LOGS_EXPORTER = "none";
+	const config = resolveOpenTelemetryConfig({
+		tracesEnabled: true,
+		metricsEnabled: true,
+		logsEnabled: true,
+	});
+	assert.equal(config.tracesEnabled, false);
+	assert.equal(config.metricsEnabled, false);
+	assert.equal(config.logsEnabled, false);
 });
 
 test("resolveOpenTelemetryConfig appends signal paths for explicit base node URLs", () => {
