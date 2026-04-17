@@ -1719,6 +1719,8 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 		},
 	);
 
+	sharedState.hooksRegistered = true;
+	consoleLog("info", "OpenTelemetry startup: runtime hooks registered");
 	sharedState.intervalId = setInterval(deleteOutdatedMsgSpans, 5000);
 }
 
@@ -1816,14 +1818,6 @@ module.exports = (RED: RuntimeApi) => {
 		initializeLoggerProvider(commonResource, logsEnabled, logsProtocol, logsUrl);
 		if (!sharedState.hooksRegistered) {
 			registerRuntimeHooks(RED);
-			if (
-				RED.hooks &&
-				typeof RED.hooks.add === "function" &&
-				typeof RED.hooks.remove === "function"
-			) {
-				sharedState.hooksRegistered = true;
-				consoleLog("info", "OpenTelemetry startup: runtime hooks registered");
-			}
 		}
 
 	}
