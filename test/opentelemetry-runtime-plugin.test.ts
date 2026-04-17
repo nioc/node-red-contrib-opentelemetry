@@ -250,6 +250,40 @@ test("resolveOpenTelemetryConfig supports grpc OTEL protocol and keeps generic e
 	assert.equal(config.logsUrl, "http://collector:4317");
 });
 
+test("resolveOpenTelemetryConfig uses config.url fallback for http/proto metrics and logs", () => {
+	const config = resolveOpenTelemetryConfig({
+		url: "http://collector:4318/otlp",
+		protocol: "http/protobuf",
+	});
+	assert.equal(config.protocol, "proto");
+	assert.equal(config.url, "http://collector:4318/otlp");
+	assert.equal(config.metricsUrl, "http://collector:4318/otlp/v1/metrics");
+	assert.equal(config.logsUrl, "http://collector:4318/otlp/v1/logs");
+});
+
+test("resolveOpenTelemetryConfig remaps generic trace path to metrics and logs when config.url is reused", () => {
+	const config = resolveOpenTelemetryConfig({
+		url: "http://collector:4318/v1/traces",
+		protocol: "http",
+	});
+	assert.equal(config.url, "http://collector:4318/v1/traces");
+	assert.equal(config.metricsUrl, "http://collector:4318/v1/metrics");
+	assert.equal(config.logsUrl, "http://collector:4318/v1/logs");
+});
+
+test("resolveOpenTelemetryConfig grpc fallback ignores default http trace URL from config.url", () => {
+	const config = resolveOpenTelemetryConfig({
+		url: "http://localhost:4318/v1/traces",
+		protocol: "grpc",
+	});
+	assert.equal(config.tracesProtocol, "grpc");
+	assert.equal(config.metricsProtocol, "grpc");
+	assert.equal(config.logsProtocol, "grpc");
+	assert.equal(config.url, "http://localhost:4317");
+	assert.equal(config.metricsUrl, "http://localhost:4317");
+	assert.equal(config.logsUrl, "http://localhost:4317");
+});
+
 test("resolveOpenTelemetryConfig reads log level from env variable", () => {
 	process.env.OTEL_LOG_LEVEL = "debug";
 	const config = resolveOpenTelemetryConfig({});
