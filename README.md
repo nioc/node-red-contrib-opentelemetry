@@ -45,19 +45,28 @@ Search for `@frankvdb/node-red-contrib-opentelemetry` in the Node-RED Palette Ma
 npm install @frankvdb/node-red-contrib-opentelemetry
 ```
 
-Restart Node-RED after installation to pick up the new nodes.
+Restart Node-RED after installation to pick up the runtime plugin.
 
 ## Usage
 
 ### Configuration
 
-This module uses a global runtime plugin plus an **OpenTelemetry config node**.
+This module runs as a **Node-RED runtime plugin**.
 
-You do **not** need to place a regular flow-processing node for tracing to work.
+Configure it via `settings.js` under `opentelemetry` (or use environment variables only). No flow node or config node is required.
 
-1.  Add/configure one **OpenTelemetry** config node (or use environment variables only).
-2.  Deploy.
-3.  Instrumentation applies across flows.
+```js
+opentelemetry: {
+  url: "http://localhost:4318/v1/traces",
+  metricsUrl: "http://localhost:4318/v1/metrics",
+  logsUrl: "http://localhost:4318/v1/logs",
+  protocol: "http",
+  serviceName: "Node-RED",
+  tracesEnabled: true,
+  metricsEnabled: false,
+  logsEnabled: false,
+}
+```
 
 Config fields:
 -   **Traces URL**: OTLP endpoint for traces (e.g., `http://localhost:4318/v1/traces`).
@@ -100,7 +109,7 @@ Supported environment variables:
 - `OTEL_LOG_LEVEL`
 - `IGNORED_NODE_TYPES`
 
-Environment values are applied only when the corresponding config value is unset or still at the default.
+Environment values are applied only when the corresponding plugin setting is unset or still at the default.
 
 ## Examples
 
