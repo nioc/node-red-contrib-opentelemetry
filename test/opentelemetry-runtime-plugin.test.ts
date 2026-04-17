@@ -1093,10 +1093,18 @@ function createPluginHarness(withHookListeners: boolean = false) {
 		nodes: {
 			getNode: (id) => ({ name: `Flow ${id}` }),
 		},
+		settings: {},
 		hooks,
 		plugins: {
-			registerRuntimePlugin: (plugin) => {
-				runtimePlugin = plugin;
+			registerPlugin: (_id, plugin) => {
+				runtimePlugin = {
+					onSettings: async (settings) => {
+						mockRed.settings.opentelemetry =
+							(settings && settings.opentelemetry) || settings || {};
+						return plugin.onadd?.();
+					},
+					onClose: async () => plugin.onremove?.(),
+				};
 			},
 		},
 	};
@@ -1289,11 +1297,11 @@ test("module initialization tolerates duplicate runtime plugin registration", ()
 	const mockRed = {
 		hooks: { add: () => {}, remove: () => {} },
 		plugins: {
-			registerRuntimePlugin: (plugin) => {
-				if (registeredPlugins.has(plugin.id)) {
-					throw new Error(`${plugin.id} already registered`);
+			registerPlugin: (id) => {
+				if (registeredPlugins.has(id)) {
+					throw new Error(`${id} already registered`);
 				}
-				registeredPlugins.add(plugin.id);
+				registeredPlugins.add(id);
 			},
 		},
 	};
@@ -1307,9 +1315,17 @@ test("module initialization tolerates duplicate runtime plugin registration", ()
 test("module initialization tolerates plugin-only Node-RED context", async () => {
 	let runtimePlugin: any;
 	const mockRed = {
+		settings: {},
 		plugins: {
-			registerRuntimePlugin: (plugin) => {
-				runtimePlugin = plugin;
+			registerPlugin: (_id, plugin) => {
+				runtimePlugin = {
+					onSettings: async (settings) => {
+						mockRed.settings.opentelemetry =
+							(settings && settings.opentelemetry) || settings || {};
+						return plugin.onadd?.();
+					},
+					onClose: async () => plugin.onremove?.(),
+				};
 			},
 		},
 	};

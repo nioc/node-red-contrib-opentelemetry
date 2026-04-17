@@ -203,14 +203,15 @@ type RuntimeRedNodeInstance = {
 	name?: string;
 };
 type RuntimePluginRegistration = {
-	id: string;
-	onSettings?: (settings: unknown) => void;
-	onClose?: () => Promise<void> | void;
+	type?: string;
+	settings?: Record<string, unknown>;
+	onadd?: () => Promise<void> | void;
+	onremove?: () => Promise<void> | void;
 	[key: string]: unknown;
 };
 type RuntimeApi = NodeAPI & {
 	plugins: NodeAPI["plugins"] & {
-		registerRuntimePlugin?: (plugin: RuntimePluginRegistration) => void;
+		registerPlugin?: (id: string, plugin: RuntimePluginRegistration) => void;
 	};
 };
 
@@ -1748,9 +1749,12 @@ async function shutdownSignalProviders(): Promise<void> {
 module.exports = (RED: RuntimeApi) => {
 	let runtimePluginInitialized = false;
 
-	function registerRuntimePluginOnce(plugin: RuntimePluginRegistration): void {
+	function registerRuntimePluginOnce(
+		id: string,
+		plugin: RuntimePluginRegistration,
+	): void {
 		try {
-			RED.plugins?.registerRuntimePlugin?.(plugin);
+			RED.plugins?.registerPlugin?.(id, plugin);
 		} catch (error) {
 			if (!isAlreadyRegisteredError(error)) {
 				consoleLog(
@@ -1842,38 +1846,48 @@ module.exports = (RED: RuntimeApi) => {
 	}
 
 	// Support Node-RED 4+ Runtime Plugin.
-	if (RED.plugins && typeof RED.plugins.registerRuntimePlugin === "function") {
-		registerRuntimePluginOnce({
-			id: "opentelemetry-runtime",
-			onSettings: async (settings: unknown) => {
-				try {
-					let pluginConfig: OTELConfig = {};
-					if (
-						typeof settings === "object" &&
-						settings !== null &&
-						"opentelemetry" in settings
-					) {
-						const pluginSettings = settings as { opentelemetry?: OTELConfig };
-						pluginConfig = pluginSettings.opentelemetry ?? {};
-					}
-					await initOTEL(pluginConfig);
-					runtimePluginInitialized = true;
-				} catch (error) {
-					consoleLog("error", "OpenTelemetry runtime plugin settings failed.", error);
+	if (
+		RED.plugins &&
+		typeof RED.plugins.registerPlugin === "function"
+	) {
+		const applyRuntimeSettings = async (settings: unknown): Promise<void> => {
+			try {
+				let pluginConfig: OTELConfig = {};
+				if (typeof settings === "object" && settings !== null) {
+					pluginConfig = settings as OTELConfig;
 				}
-			},
-			onClose: async () => {
-				try {
-					if (!runtimePluginInitialized) {
-						return;
-					}
-					await stopOTEL();
-					runtimePluginInitialized = false;
-				} catch (error) {
-					consoleLog("error", "OpenTelemetry runtime plugin shutdown failed.", error);
+				await initOTEL(pluginConfig);
+				runtimePluginInitialized = true;
+			} catch (error) {
+				consoleLog("error", "OpenTelemetry runtime plugin settings failed.", error);
+			}
+		};
+
+		const shutdownRuntimePlugin = async (): Promise<void> => {
+			try {
+				if (!runtimePluginInitialized) {
+					return;
 				}
+				await stopOTEL();
+				runtimePluginInitialized = false;
+			} catch (error) {
+				consoleLog("error", "OpenTelemetry runtime plugin shutdown failed.", error);
+			}
+		};
+
+		const runtimePlugin = {
+			type: "opentelemetry-runtime",
+			onadd: async () => {
+				await applyRuntimeSettings(
+					(RED.settings as { opentelemetry?: OTELConfig } | undefined)
+						?.opentelemetry ?? {},
+				);
 			},
-		});
+			onremove: async () => {
+				await shutdownRuntimePlugin();
+			},
+		};
+		registerRuntimePluginOnce("opentelemetry-runtime", runtimePlugin);
 	} else {
 		consoleLog(
 			"warn",

@@ -2,7 +2,7 @@ This file provides instructions for AI agents working with this repository.
 
 ## Project Overview
 
-This project is a Node-RED module for OpenTelemetry (Traces, Metrics, Logs).
+This project is a Node-RED runtime plugin for OpenTelemetry (Traces, Metrics, Logs).
 
 ## Getting Started
 
@@ -11,14 +11,17 @@ This project is a Node-RED module for OpenTelemetry (Traces, Metrics, Logs).
 
 ## Development Guidelines
 
-*   Source code is located in the `src/` directory.
+*   Runtime plugin source code is located in `src/plugins/`.
 *   Tests are in the `test/` directory.
 *   The project uses the built-in Node.js test runner (`node --test`).
-*   The command to run tests with a coverage report is `npm test -- --experimental-test-coverage`.
+*   The command to run tests with a coverage report is `npm run test:cov`.
 *   Avoid unintended modifications to `package.json` and `package-lock.json` when running commands.
+*   This package is plugin-only; do not add Node-RED config node or palette node registration.
+*   Register runtime plugins via `RED.plugins.registerPlugin(id, definition)` with lifecycle in `onadd`/`onremove`.
+*   Runtime plugin settings are read from `RED.settings.opentelemetry`.
 
 ## Testing Notes
 
-*   Tests for Node-RED hooks require mocking the global `RED` object, including its `nodes` and `hooks` properties, to simulate the Node-RED environment.
-*   When testing Node-RED event handlers that are extracted from a node instance, `Function.prototype.call()` or `Function.prototype.bind()` must be used to preserve the correct `this` context.
+*   Tests for Node-RED hooks require mocking the global `RED` object, including its `nodes`, `hooks`, `settings`, and `plugins` properties, to simulate the plugin runtime environment.
+*   Runtime plugin tests should mock `RED.plugins.registerPlugin(...)` and invoke plugin lifecycle through `onadd`/`onremove` (or through the test harness wrappers around `onSettings`/`onClose`).
 *   The test suite stubs external dependencies. For example, `@node-red/util` is mocked by `test/stubs/node-red-util.cjs`.

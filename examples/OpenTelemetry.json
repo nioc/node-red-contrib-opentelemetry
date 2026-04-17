@@ -1,83 +1,69 @@
 [
-	{
-		"id": "f6f2187d.f172e8",
-		"type": "tab",
-		"label": "OpenTelemetry Example",
-		"disabled": false,
-		"info": ""
-	},
-	{
-		"id": "ac125c4c6d10643e",
-		"type": "OpenTelemetry",
-		"name": "OTEL Config",
-		"url": "http://localhost:4318/v1/traces",
-		"serviceName": "Node-RED-Tracing-Demo",
-		"protocol": "http",
-		"rootPrefix": "Message ",
-		"timeout": 10,
-		"ignoredNodeTypes": "debug,catch",
-		"propagateHeaderNodeTypes": "http request",
-		"attributeMappings": [
-			{
-				"isAfter": false,
-				"flow": "",
-				"nodeType": "http in",
-				"key": "http.method",
-				"path": "req.method"
-			}
-		]
-	},
-	{
-		"id": "1",
-		"type": "inject",
-		"z": "f6f2187d.f172e8",
-		"name": "Trigger Trace",
-		"props": [
-			{
-				"p": "payload"
-			}
-		],
-		"repeat": "",
-		"crontab": "",
-		"once": false,
-		"onceDelay": 0.1,
-		"topic": "",
-		"payload": "{\"test\":\"data\"}",
-		"payloadType": "json",
-		"x": 130,
-		"y": 180,
-		"wires": [["2"]]
-	},
-	{
-		"id": "2",
-		"type": "function",
-		"z": "f6f2187d.f172e8",
-		"name": "Processing Step",
-		"func": "msg.payload.processed = true;\nreturn msg;",
-		"outputs": 1,
-		"noerr": 0,
-		"initialize": "",
-		"finalize": "",
-		"libs": [],
-		"x": 340,
-		"y": 180,
-		"wires": [["3"]]
-	},
-	{
-		"id": "3",
-		"type": "debug",
-		"z": "f6f2187d.f172e8",
-		"name": "Result",
-		"active": true,
-		"tosidebar": true,
-		"console": false,
-		"tostatus": false,
-		"complete": "false",
-		"statusVal": "",
-		"statusType": "auto",
-		"x": 530,
-		"y": 180,
-		"wires": []
-	}
+  {
+    "id": "f6f2187d.f172e8",
+    "type": "tab",
+    "label": "OpenTelemetry Example",
+    "disabled": false,
+    "info": "This flow demonstrates tracing behavior only. Configure the runtime plugin in settings.js (see examples/opentelemetry.settings.example.js)."
+  },
+  {
+    "id": "1",
+    "type": "inject",
+    "z": "f6f2187d.f172e8",
+    "name": "Trigger Trace",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"test\":\"data\"}",
+    "payloadType": "json",
+    "x": 130,
+    "y": 180,
+    "wires": [
+      [
+        "2"
+      ]
+    ]
+  },
+  {
+    "id": "2",
+    "type": "function",
+    "z": "f6f2187d.f172e8",
+    "name": "Processing Step",
+    "func": "msg.payload.processed = true;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 340,
+    "y": 180,
+    "wires": [
+      [
+        "3"
+      ]
+    ]
+  },
+  {
+    "id": "3",
+    "type": "debug",
+    "z": "f6f2187d.f172e8",
+    "name": "Result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 530,
+    "y": 180,
+    "wires": []
+  }
 ]
-
