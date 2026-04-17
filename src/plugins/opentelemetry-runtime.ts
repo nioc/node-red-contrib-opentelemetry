@@ -110,7 +110,8 @@ interface OTELConfig {
 	logsEnabled?: boolean;
 	flowEventLogsEnabled?: boolean;
 	rootPrefix?: string;
-	ignoredNodeTypes?: string;
+	excludedNodeTypes?: string;
+	includedNodeTypes?: string;
 	propagateHeaderNodeTypes?: string;
 	logLevel?: string;
 	timeout?: number;
@@ -140,7 +141,8 @@ interface ResolvedOTELConfig {
 	logsEnabled: boolean;
 	flowEventLogsEnabled: boolean;
 	rootPrefix: string;
-	ignoredNodeTypes: string;
+	excludedNodeTypes: string;
+	includedNodeTypes: string;
 	propagateHeaderNodeTypes: string;
 	logLevel: "off" | "error" | "warn" | "info" | "debug" | "trace";
 	timeout: number;
@@ -248,7 +250,8 @@ interface SharedState {
 	rootPrefix: string;
 	timeout: number;
 	attributeMappings: AttributeMapping[];
-	ignoredNodeTypesList: string[];
+	excludedNodeTypesList: string[];
+	includedNodeTypesList: string[];
 	propagateHeaderNodeTypesList: string[];
 	tracer: Tracer | null;
 	provider: BasicTracerProvider | null;
@@ -271,7 +274,8 @@ const sharedState: SharedState = {
 	rootPrefix: "",
 	timeout: 10_000,
 	attributeMappings: [],
-	ignoredNodeTypesList: [],
+	excludedNodeTypesList: [],
+	includedNodeTypesList: [],
 	propagateHeaderNodeTypesList: [],
 	tracer: null,
 	provider: null, // Trace provider
@@ -295,7 +299,8 @@ const DEFAULT_OTEL_GRPC_URL = "http://localhost:4317";
 const DEFAULT_OTEL_PROTOCOL = "http";
 const DEFAULT_OTEL_SERVICE_NAME = "Node-RED";
 const DEFAULT_ROOT_SPAN_NAME_PREFIX = "";
-const DEFAULT_IGNORED_NODE_TYPES = "inject,debug,catch";
+const DEFAULT_EXCLUDED_NODE_TYPES = "inject,debug,catch";
+const DEFAULT_INCLUDED_NODE_TYPES = "";
 const DEFAULT_PROPAGATE_HEADER_NODE_TYPES = "";
 const DEFAULT_LOG_LEVEL = "warn";
 const DEFAULT_TIMEOUT_SECONDS = 10;
@@ -320,6 +325,17 @@ function splitCsv(value: string | undefined | null): string[] {
 
 function normalizeNodeType(nodeType: string | undefined | null): string {
 	return String(nodeType ?? "").trim().toLowerCase();
+}
+
+function shouldSkipNodeType(nodeType: string | undefined | null): boolean {
+	const normalizedNodeType = normalizeNodeType(nodeType);
+	if (sharedState.excludedNodeTypesList.includes(normalizedNodeType)) {
+		return true;
+	}
+	if (sharedState.includedNodeTypesList.length === 0) {
+		return false;
+	}
+	return !sharedState.includedNodeTypesList.includes(normalizedNodeType);
 }
 
 function ensureSignalPath(
@@ -788,7 +804,8 @@ function formatStartupConfigSummary(config: ResolvedOTELConfig): string {
 		`logsProtocol=${String(config.logsProtocol)}`,
 		`logsUrl=${logsUrl}`,
 		`rootPrefix=${String(config.rootPrefix)}`,
-		`ignoredNodeTypes=${String(config.ignoredNodeTypes)}`,
+		`excludedNodeTypes=${String(config.excludedNodeTypes)}`,
+		`includedNodeTypes=${String(config.includedNodeTypes)}`,
 		`propagateHeaderNodeTypes=${String(config.propagateHeaderNodeTypes)}`,
 		`timeout=${String(config.timeout)}`,
 		`attributeMappings=${String(attributeMappingsCount)}`,
@@ -810,7 +827,9 @@ function resolveOpenTelemetryConfig(
 	const genericProtocol = env.OTEL_EXPORTER_OTLP_PROTOCOL;
 	const serviceNameEnv = env.OTEL_SERVICE_NAME;
 	const logLevelEnv = env.OTEL_LOG_LEVEL;
-	const ignoredNodeTypesEnv = env.IGNORED_NODE_TYPES;
+	const excludedNodeTypesEnv = env.OTEL_EXCLUDED_NODE_TYPES;
+	const includedNodeTypesEnv = env.OTEL_INCLUDED_NODE_TYPES;
+	const propagateHeaderNodeTypesEnv = env.OTEL_PROPAGATE_HEADER_NODE_TYPES;
 	const tracesExporterEnv = env.OTEL_TRACES_EXPORTER;
 	const metricsExporterEnv = env.OTEL_METRICS_EXPORTER;
 	const logsExporterEnv = env.OTEL_LOGS_EXPORTER;
@@ -940,12 +959,18 @@ function resolveOpenTelemetryConfig(
 			(hasLogsOtlpEnvConfig ? true : false),
 		flowEventLogsEnabled: config.flowEventLogsEnabled ?? true,
 		rootPrefix: config.rootPrefix ?? DEFAULT_ROOT_SPAN_NAME_PREFIX,
-		ignoredNodeTypes:
-			ignoredNodeTypesEnv ??
-			config.ignoredNodeTypes ??
-			DEFAULT_IGNORED_NODE_TYPES,
+		excludedNodeTypes:
+			excludedNodeTypesEnv ??
+			config.excludedNodeTypes ??
+			DEFAULT_EXCLUDED_NODE_TYPES,
+		includedNodeTypes:
+			includedNodeTypesEnv ??
+			config.includedNodeTypes ??
+			DEFAULT_INCLUDED_NODE_TYPES,
 		propagateHeaderNodeTypes:
-			config.propagateHeaderNodeTypes ?? DEFAULT_PROPAGATE_HEADER_NODE_TYPES,
+			propagateHeaderNodeTypesEnv ??
+			config.propagateHeaderNodeTypes ??
+			DEFAULT_PROPAGATE_HEADER_NODE_TYPES,
 		logLevel: configuredLogLevel,
 		timeout: config.timeout ?? DEFAULT_TIMEOUT_SECONDS,
 		attributeMappings: config.attributeMappings ?? [],
@@ -1480,7 +1505,7 @@ function createSpan(
 		if (isNotTraced && !existingParent) {
 			pluginLog(
 				"debug",
-				`=> Skipped span creation for ignored root node ${nodeDefinition.type}`,
+				`=> Skipped span creation for excluded or non-included root node ${nodeDefinition.type}`,
 			);
 			return;
 		}
@@ -1811,7 +1836,10 @@ function applyResolvedRuntimeConfig(resolvedConfig: ResolvedOTELConfig): void {
 	sharedState.attributeMappings = sanitizeAttributeMappings(
 		resolvedConfig.attributeMappings,
 	);
-	sharedState.ignoredNodeTypesList = splitCsv(resolvedConfig.ignoredNodeTypes).map(
+	sharedState.excludedNodeTypesList = splitCsv(resolvedConfig.excludedNodeTypes).map(
+		normalizeNodeType,
+	);
+	sharedState.includedNodeTypesList = splitCsv(resolvedConfig.includedNodeTypes).map(
 		normalizeNodeType,
 	);
 	sharedState.propagateHeaderNodeTypesList = splitCsv(
@@ -2027,9 +2055,7 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 					event.msg,
 					event.source?.node as RuntimeNodeDef,
 					null,
-					sharedState.ignoredNodeTypesList.includes(
-						normalizeNodeType(event.source?.node.type),
-					),
+					shouldSkipNodeType(event.source?.node.type),
 				);
 			}
 		});
@@ -2063,9 +2089,7 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 			sendEvent.msg,
 			sendEvent.destination.node,
 			null,
-			sharedState.ignoredNodeTypesList.includes(
-				normalizeNodeType(sendEvent.destination.node.type),
-			),
+			shouldSkipNodeType(sendEvent.destination.node.type),
 		);
 		if (
 			span &&
@@ -2359,6 +2383,9 @@ module.exports.__test__ = {
 		sharedState.rootPrefix = "";
 		sharedState.timeout = 10;
 		sharedState.attributeMappings = [];
+		sharedState.excludedNodeTypesList = [];
+		sharedState.includedNodeTypesList = [];
+		sharedState.propagateHeaderNodeTypesList = [];
 		sharedState.hooksRegistered = false;
 		if (sharedState.intervalId) {
 			clearInterval(sharedState.intervalId);

@@ -71,7 +71,8 @@ module.exports = {
     logsEnabled: false,
     flowEventLogsEnabled: true,
     rootPrefix: "",
-    ignoredNodeTypes: "debug,catch",
+    excludedNodeTypes: "debug,catch",
+    includedNodeTypes: "",
     propagateHeaderNodeTypes: "http request,mqtt out",
     logLevel: "warn",
     timeout: 10,
@@ -99,7 +100,8 @@ Config fields (`settings.js` -> `opentelemetry`):
 -   **protocol**: `http` (json) or `proto` (protobuf).
 -   **serviceName**: Service name shown in your telemetry backend.
 -   **rootPrefix**: Optional prefix for root span names.
--   **ignoredNodeTypes**: Comma-separated Node-RED node types excluded from tracing.
+-   **excludedNodeTypes**: Comma-separated Node-RED node types excluded from tracing.
+-   **includedNodeTypes**: Comma-separated Node-RED node types allowed for tracing. Empty means include all.
 -   **propagateHeaderNodeTypes**: Comma-separated node types that should propagate trace headers.
 -   **logLevel**: `off`, `error`, `warn`, `info`, or `debug`.
 -   **timeout**: Seconds after which an unmodified message span is closed.
@@ -114,8 +116,12 @@ At runtime the module registers Node-RED messaging hooks and tracks spans per `m
 3. `onComplete`: ends the active node span and updates status/error attributes when applicable.
 4. Periodic cleanup closes stale message span trees after `timeout`.
 
-`ignoredNodeTypes` behavior:
-- If a node type is in `ignoredNodeTypes`, spans for that node type are skipped.
+`excludedNodeTypes` behavior:
+- If a node type is in `excludedNodeTypes`, spans for that node type are skipped.
+
+`includedNodeTypes` behavior:
+- If `includedNodeTypes` is empty, all non-excluded node types are traced.
+- If `includedNodeTypes` has values, only listed node types are traced.
 
 `propagateHeaderNodeTypes` behavior:
 - In `preDeliver`, existing trace headers are cleared for matching source node types.
@@ -131,7 +137,9 @@ Supported environment variables:
 - `OTEL_EXPORTER_OTLP_PROTOCOL`
 - `OTEL_SERVICE_NAME`
 - `OTEL_LOG_LEVEL`
-- `IGNORED_NODE_TYPES`
+- `OTEL_EXCLUDED_NODE_TYPES`
+- `OTEL_INCLUDED_NODE_TYPES`
+- `OTEL_PROPAGATE_HEADER_NODE_TYPES`
 
 Environment values are applied only when the corresponding plugin setting is unset or still at the default.
 
@@ -159,4 +167,5 @@ This project follows [Semantic Versioning](https://semver.org/). See the [releas
 ## License
 
 This project is licensed under the **GNU Lesser General Public License v3.0**. See the [LICENSE](LICENSE.md) file for details.
+
 

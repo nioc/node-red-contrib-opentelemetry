@@ -19,7 +19,8 @@ module.exports = {
 		logsEnabled: false,
 		flowEventLogsEnabled: true,
 		rootPrefix: "",
-		ignoredNodeTypes: "debug,catch",
+		excludedNodeTypes: "debug,catch",
+		includedNodeTypes: "",
 		propagateHeaderNodeTypes: "http request,mqtt out",
 		logLevel: "warn",
 		timeout: 10,
@@ -50,7 +51,8 @@ Restart Node-RED after changing these settings.
 - `logsEnabled`: Enable log export (flow hook events and Node-RED runtime logger events).
 - `flowEventLogsEnabled`: Enable/disable flow hook event logs while keeping runtime logger forwarding.
 - `rootPrefix`: Prefix added to root span names.
-- `ignoredNodeTypes`: Comma-separated node types excluded from tracing.
+- `excludedNodeTypes`: Comma-separated node types excluded from tracing.
+- `includedNodeTypes`: Comma-separated node types allowed for tracing. Empty means include all.
 - `propagateHeaderNodeTypes`: Comma-separated node types for context propagation.
 - `logLevel`: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
 - `timeout`: Span cleanup timeout (seconds).
@@ -67,4 +69,8 @@ Environment values are used when the matching plugin setting is missing or still
 - `OTEL_EXPORTER_OTLP_PROTOCOL`
 - `OTEL_SERVICE_NAME`
 - `OTEL_LOG_LEVEL`
-- `IGNORED_NODE_TYPES`
+- `OTEL_EXCLUDED_NODE_TYPES`
+- `OTEL_INCLUDED_NODE_TYPES`
+- `OTEL_PROPAGATE_HEADER_NODE_TYPES`
+
+

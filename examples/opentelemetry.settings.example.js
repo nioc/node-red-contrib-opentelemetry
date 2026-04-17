@@ -13,7 +13,8 @@ module.exports = {
 		logsEnabled: false,
 		flowEventLogsEnabled: true,
 		rootPrefix: "",
-		ignoredNodeTypes: "debug,catch",
+		excludedNodeTypes: "debug,catch",
+		includedNodeTypes: "",
 		propagateHeaderNodeTypes: "http request,mqtt out",
 		logLevel: "warn",
 		timeout: 10,
@@ -28,3 +29,4 @@ module.exports = {
 		],
 	},
 };
+

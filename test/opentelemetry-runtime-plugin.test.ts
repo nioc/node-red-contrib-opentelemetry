@@ -340,27 +340,75 @@ test("resolveOpenTelemetryConfig gives explicit plugin logLevel precedence over 
 	assert.equal(config.logLevel, "trace");
 });
 
-test("resolveOpenTelemetryConfig reads ignoredNodeTypes from env variable", () => {
-	process.env.IGNORED_NODE_TYPES = "debug,catch,inject";
+test("resolveOpenTelemetryConfig reads excludedNodeTypes from env variable", () => {
+	process.env.OTEL_EXCLUDED_NODE_TYPES = "debug,catch,inject";
 	const config = resolveOpenTelemetryConfig({});
-	assert.equal(config.ignoredNodeTypes, "debug,catch,inject");
+	assert.equal(config.excludedNodeTypes, "debug,catch,inject");
 });
 
-test("resolveOpenTelemetryConfig gives env ignoredNodeTypes precedence over explicit", () => {
-	process.env.IGNORED_NODE_TYPES = "debug,catch,inject";
-	const config = resolveOpenTelemetryConfig({ ignoredNodeTypes: "debug,catch" });
-	assert.equal(config.ignoredNodeTypes, "debug,catch,inject");
+test("resolveOpenTelemetryConfig gives env excludedNodeTypes precedence over explicit", () => {
+	process.env.OTEL_EXCLUDED_NODE_TYPES = "debug,catch,inject";
+	const config = resolveOpenTelemetryConfig({ excludedNodeTypes: "debug,catch" });
+	assert.equal(config.excludedNodeTypes, "debug,catch,inject");
 
 	const explicit = resolveOpenTelemetryConfig({
-		ignoredNodeTypes: "debug,inject",
+		excludedNodeTypes: "debug,inject",
 	});
-	assert.equal(explicit.ignoredNodeTypes, "debug,catch,inject");
+	assert.equal(explicit.excludedNodeTypes, "debug,catch,inject");
 });
 
-test("resolveOpenTelemetryConfig preserves explicit empty ignoredNodeTypes", () => {
-	delete process.env.IGNORED_NODE_TYPES;
-	const config = resolveOpenTelemetryConfig({ ignoredNodeTypes: "" });
-	assert.equal(config.ignoredNodeTypes, "");
+test("resolveOpenTelemetryConfig preserves explicit empty excludedNodeTypes", () => {
+	delete process.env.OTEL_EXCLUDED_NODE_TYPES;
+	const config = resolveOpenTelemetryConfig({ excludedNodeTypes: "" });
+	assert.equal(config.excludedNodeTypes, "");
+});
+
+test("resolveOpenTelemetryConfig reads includedNodeTypes from env variable", () => {
+	process.env.OTEL_INCLUDED_NODE_TYPES = "function,http request";
+	const config = resolveOpenTelemetryConfig({});
+	assert.equal(config.includedNodeTypes, "function,http request");
+});
+
+test("resolveOpenTelemetryConfig gives env includedNodeTypes precedence over explicit", () => {
+	process.env.OTEL_INCLUDED_NODE_TYPES = "function,http request";
+	const config = resolveOpenTelemetryConfig({ includedNodeTypes: "inject,debug" });
+	assert.equal(config.includedNodeTypes, "function,http request");
+
+	const explicit = resolveOpenTelemetryConfig({
+		includedNodeTypes: "mqtt out,http in",
+	});
+	assert.equal(explicit.includedNodeTypes, "function,http request");
+});
+
+test("resolveOpenTelemetryConfig preserves explicit empty includedNodeTypes", () => {
+	delete process.env.OTEL_INCLUDED_NODE_TYPES;
+	const config = resolveOpenTelemetryConfig({ includedNodeTypes: "" });
+	assert.equal(config.includedNodeTypes, "");
+});
+
+test("resolveOpenTelemetryConfig reads propagateHeaderNodeTypes from env variable", () => {
+	process.env.OTEL_PROPAGATE_HEADER_NODE_TYPES = "http request,mqtt out";
+	const config = resolveOpenTelemetryConfig({});
+	assert.equal(config.propagateHeaderNodeTypes, "http request,mqtt out");
+});
+
+test("resolveOpenTelemetryConfig gives env propagateHeaderNodeTypes precedence over explicit", () => {
+	process.env.OTEL_PROPAGATE_HEADER_NODE_TYPES = "http request,mqtt out";
+	const config = resolveOpenTelemetryConfig({
+		propagateHeaderNodeTypes: "function,inject",
+	});
+	assert.equal(config.propagateHeaderNodeTypes, "http request,mqtt out");
+
+	const explicit = resolveOpenTelemetryConfig({
+		propagateHeaderNodeTypes: "mqtt in,amqp out",
+	});
+	assert.equal(explicit.propagateHeaderNodeTypes, "http request,mqtt out");
+});
+
+test("resolveOpenTelemetryConfig preserves explicit empty propagateHeaderNodeTypes", () => {
+	delete process.env.OTEL_PROPAGATE_HEADER_NODE_TYPES;
+	const config = resolveOpenTelemetryConfig({ propagateHeaderNodeTypes: "" });
+	assert.equal(config.propagateHeaderNodeTypes, "");
 });
 
 test("resolveOpenTelemetryConfig appends signal paths for specific endpoints without path", () => {
@@ -465,7 +513,8 @@ test("formatStartupConfigSummary masks credentials in endpoint URLs", () => {
 		metricsEnabled: true,
 		logsEnabled: true,
 		rootPrefix: "",
-		ignoredNodeTypes: "debug,catch",
+		excludedNodeTypes: "debug,catch",
+		includedNodeTypes: "",
 		propagateHeaderNodeTypes: "",
 		logLevel: "warn",
 		timeout: 10,
@@ -1299,7 +1348,7 @@ test("postDeliver.otel hook injects trace context for http and mqtt", async () =
 			protocol: "http",
 			serviceName: "test-service",
 			rootPrefix: "",
-			ignoredNodeTypes: "",
+			excludedNodeTypes: "",
 			propagateHeaderNodeTypes: "http request,mqtt out",
 			logLevel: "error",
 			timeout: 10,
@@ -1341,7 +1390,7 @@ test("preDeliver.otel hook clears all propagated trace headers safely", async ()
 			protocol: "http",
 			serviceName: "test-service",
 			rootPrefix: "",
-			ignoredNodeTypes: "",
+			excludedNodeTypes: "",
 			propagateHeaderNodeTypes: "function",
 			logLevel: "error",
 			timeout: 10,
@@ -1383,7 +1432,7 @@ test("onReceive.otel hook sets otelRootMsgId for split nodes", async () => {
 	await runtimePlugin.onSettings({
 		opentelemetry: {
 			url: "http://localhost:4318/v1/traces",
-			ignoredNodeTypes: "",
+			excludedNodeTypes: "",
 			propagateHeaderNodeTypes: "",
 		},
 	});
@@ -1864,7 +1913,7 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 			protocol: "http",
 			serviceName: "test-service",
 			rootPrefix: "",
-			ignoredNodeTypes: "",
+			excludedNodeTypes: "",
 			propagateHeaderNodeTypes: "",
 			logLevel: "error",
 			timeout: 10,
@@ -1896,7 +1945,7 @@ test("onSend.otel hook ignores node types using normalized matching", async () =
 			protocol: "http",
 			serviceName: "test-service",
 			rootPrefix: "",
-			ignoredNodeTypes: " Inject , debug ",
+			excludedNodeTypes: " Inject , debug ",
 			propagateHeaderNodeTypes: "",
 			logLevel: "error",
 			timeout: 10,
@@ -1913,6 +1962,41 @@ test("onSend.otel hook ignores node types using normalized matching", async () =
 		{
 			msg: { _msgid: "function-msg" },
 			source: { node: { id: "fn-node", type: "function", z: "flow-b" } },
+		},
+	]);
+	assert.equal(getMsgSpans().size, 1);
+	assert.ok(getMsgSpans().has("function-msg"));
+	assert.equal(getMsgSpans().has("inject-msg"), false);
+	await runtimePlugin.onClose();
+});
+
+test("onSend.otel hook traces only included node types when include list is set", async () => {
+	const { runtimePlugin, mockRed } = createPluginHarness(true);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			protocol: "http",
+			serviceName: "test-service",
+			rootPrefix: "",
+			excludedNodeTypes: "",
+			includedNodeTypes: " Function , HTTP request ",
+			propagateHeaderNodeTypes: "",
+			logLevel: "error",
+			timeout: 10,
+			attributeMappings: [],
+		},
+	});
+	const onSendListener = mockRed.hooks.listeners["onSend.otel"];
+	assert.ok(onSendListener);
+	onSendListener([
+		{
+			msg: { _msgid: "function-msg" },
+			source: { node: { id: "fn-node", type: "function", z: "flow-a" } },
+		},
+		{
+			msg: { _msgid: "inject-msg" },
+			source: { node: { id: "inject-node", type: "inject", z: "flow-b" } },
 		},
 	]);
 	assert.equal(getMsgSpans().size, 1);
@@ -2049,6 +2133,4 @@ test("pluginLog should not apply plugin log-level filtering", () => {
 	assert.equal(logSpy.mock.calls[0].arguments[0].msg, "still forwarded");
 	assert.equal(logSpy.mock.calls[0].arguments[0].level, nodeRedUtilStub.log.INFO);
 });
-
-
 
