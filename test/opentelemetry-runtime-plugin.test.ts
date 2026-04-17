@@ -512,18 +512,41 @@ test("createSpan skips creation when span already exists", () => {
 	assert.equal(createSpan(mockRed, tracer, msg, node, {}, false), undefined);
 });
 
-test("createSpan stores fake span when tracing disabled for node", () => {
+test("createSpan skips root span creation when tracing is disabled for the first node", () => {
 	const tracer = {
 		startSpan: (name, options) => createFakeSpan(name, options),
 	};
 	const msg = { _msgid: "1" };
 	const node = { id: "node", type: "function", name: "Function", z: "flow" };
 	const span = createSpan(mockRed, tracer, msg, node, {}, true);
-	assert.equal(typeof span.end, "function");
+	assert.equal(span, undefined);
+	assert.equal(getMsgSpans().size, 0);
+});
+
+test("createSpan stores fake span for ignored non-root nodes", () => {
+	const tracer = {
+		startSpan: (name, options) => createFakeSpan(name, options),
+	};
+	const msg = { _msgid: "1" };
+	const rootNode = {
+		id: "root-node",
+		type: "function",
+		name: "Function Root",
+		z: "flow",
+	};
+	const ignoredNode = {
+		id: "ignored-node",
+		type: "debug",
+		name: "Debug",
+		z: "flow",
+	};
+	createSpan(mockRed, tracer, msg, rootNode, {}, false);
+	const ignoredSpan = createSpan(mockRed, tracer, msg, ignoredNode, {}, true);
+	assert.equal(typeof ignoredSpan.end, "function");
 	const spansMap = getMsgSpans();
-	const storedSpan = spansMap.get("1").spans.get("1#node");
-	assert.notEqual(storedSpan, span);
-	assert.equal(storedSpan.attributes["node_red.node.type"], "function");
+	const storedSpan = spansMap.get("1").spans.get("1#ignored-node");
+	assert.notEqual(storedSpan, ignoredSpan);
+	assert.equal(storedSpan.attributes["node_red.node.type"], "debug");
 });
 
 test("endSpan ends child span and clears parent when last span completes", () => {
@@ -1861,6 +1884,40 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 		},
 	]);
 	assert.equal(getMsgSpans().size, 2);
+	await runtimePlugin.onClose();
+});
+
+test("onSend.otel hook ignores node types using normalized matching", async () => {
+	const { runtimePlugin, mockRed } = createPluginHarness(true);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			protocol: "http",
+			serviceName: "test-service",
+			rootPrefix: "",
+			ignoredNodeTypes: " Inject , debug ",
+			propagateHeaderNodeTypes: "",
+			logLevel: "error",
+			timeout: 10,
+			attributeMappings: [],
+		},
+	});
+	const onSendListener = mockRed.hooks.listeners["onSend.otel"];
+	assert.ok(onSendListener);
+	onSendListener([
+		{
+			msg: { _msgid: "inject-msg" },
+			source: { node: { id: "inject-node", type: "inject", z: "flow-a" } },
+		},
+		{
+			msg: { _msgid: "function-msg" },
+			source: { node: { id: "fn-node", type: "function", z: "flow-b" } },
+		},
+	]);
+	assert.equal(getMsgSpans().size, 1);
+	assert.ok(getMsgSpans().has("function-msg"));
+	assert.equal(getMsgSpans().has("inject-msg"), false);
 	await runtimePlugin.onClose();
 });
 
