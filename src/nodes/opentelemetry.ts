@@ -1777,6 +1777,10 @@ module.exports = (RED: RuntimeApi) => {
 			"warn",
 			`OpenTelemetry startup config: ${formatStartupConfigSummary(resolvedConfig)}`,
 		);
+		consoleLog(
+			"debug",
+			`OpenTelemetry startup endpoints: traces(${tracesProtocol})=${url ?? "disabled"}, metrics(${metricsProtocol})=${metricsUrl ?? "disabled"}, logs(${logsProtocol})=${logsUrl ?? "disabled"}`,
+		);
 		if (
 			!trackLifecycle &&
 			(sharedState.refCount > 0 ||
@@ -1784,6 +1788,7 @@ module.exports = (RED: RuntimeApi) => {
 				sharedState.meterProvider ||
 				sharedState.loggerProvider)
 		) {
+			consoleLog("debug", "OpenTelemetry startup: replacing existing providers");
 			await shutdownSignalProviders();
 		}
 		const commonResource = createCommonResource(serviceName);
@@ -1803,6 +1808,7 @@ module.exports = (RED: RuntimeApi) => {
 		if (!sharedState.hooksRegistered) {
 			registerRuntimeHooks(RED);
 			sharedState.hooksRegistered = true;
+			consoleLog("info", "OpenTelemetry startup: runtime hooks registered");
 		}
 
 		if (trackLifecycle) {
