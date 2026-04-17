@@ -318,6 +318,10 @@ function splitCsv(value: string | undefined | null): string[] {
 		.filter((key) => key.length > 0);
 }
 
+function normalizeNodeType(nodeType: string | undefined | null): string {
+	return String(nodeType ?? "").trim().toLowerCase();
+}
+
 function ensureSignalPath(
 	urlValue: string | undefined,
 	signalPath: "/v1/traces" | "/v1/metrics" | "/v1/logs",
@@ -1473,6 +1477,13 @@ function createSpan(
 		const now = Date.now();
 		const kind = resolveSpanKind(nodeDefinition.type);
 		const commonAttributes = buildCommonAttributes(msgId, nodeDefinition, flowName);
+		if (isNotTraced && !existingParent) {
+			pluginLog(
+				"debug",
+				`=> Skipped span creation for ignored root node ${nodeDefinition.type}`,
+			);
+			return;
+		}
 		let parentSpan: Span | undefined;
 		let ctx: Context | undefined =
 			existingParent &&
@@ -1800,10 +1811,12 @@ function applyResolvedRuntimeConfig(resolvedConfig: ResolvedOTELConfig): void {
 	sharedState.attributeMappings = sanitizeAttributeMappings(
 		resolvedConfig.attributeMappings,
 	);
-	sharedState.ignoredNodeTypesList = splitCsv(resolvedConfig.ignoredNodeTypes);
+	sharedState.ignoredNodeTypesList = splitCsv(resolvedConfig.ignoredNodeTypes).map(
+		normalizeNodeType,
+	);
 	sharedState.propagateHeaderNodeTypesList = splitCsv(
 		resolvedConfig.propagateHeaderNodeTypes,
-	);
+	).map(normalizeNodeType);
 	sharedState.flowEventLogsEnabled = resolvedConfig.flowEventLogsEnabled;
 }
 
@@ -2015,7 +2028,7 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 					event.source?.node as RuntimeNodeDef,
 					null,
 					sharedState.ignoredNodeTypesList.includes(
-						event.source?.node.type ?? "",
+						normalizeNodeType(event.source?.node.type),
 					),
 				);
 			}
@@ -2026,7 +2039,7 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 		if (
 			sendEvent.source?.node &&
 			sharedState.propagateHeaderNodeTypesList.includes(
-				sendEvent.source.node.type,
+				normalizeNodeType(sendEvent.source.node.type),
 			)
 		) {
 			if (!sendEvent.msg.headers) {
@@ -2051,14 +2064,14 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 			sendEvent.destination.node,
 			null,
 			sharedState.ignoredNodeTypesList.includes(
-				sendEvent.destination.node.type,
+				normalizeNodeType(sendEvent.destination.node.type),
 			),
 		);
 		if (
 			span &&
 			sendEvent.destination.node &&
 			sharedState.propagateHeaderNodeTypesList.includes(
-				sendEvent.destination.node.type,
+				normalizeNodeType(sendEvent.destination.node.type),
 			)
 		) {
 			const output: Record<string, string> = {};
@@ -2196,7 +2209,7 @@ module.exports = (RED: RuntimeApi) => {
 		} = resolvedConfig;
 		applyResolvedRuntimeConfig(resolvedConfig);
 		pluginLog(
-			"warn",
+			"info",
 			`OpenTelemetry startup config: ${formatStartupConfigSummary(resolvedConfig)}`,
 		);
 		pluginLog(
