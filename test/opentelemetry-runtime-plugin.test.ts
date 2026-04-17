@@ -244,10 +244,10 @@ test("resolveOpenTelemetryConfig reads log level from env variable", () => {
 	assert.equal(config.logLevel, "debug");
 });
 
-test("resolveOpenTelemetryConfig uses explicit config log level over env", () => {
+test("resolveOpenTelemetryConfig gives env log level precedence over explicit config", () => {
 	process.env.OTEL_LOG_LEVEL = "error";
 	const config = resolveOpenTelemetryConfig({ logLevel: "info" });
-	assert.equal(config.logLevel, "info");
+	assert.equal(config.logLevel, "error");
 });
 
 test("resolveOpenTelemetryConfig reads ignoredNodeTypes from env variable", () => {
@@ -265,6 +265,12 @@ test("resolveOpenTelemetryConfig gives env ignoredNodeTypes precedence over expl
 		ignoredNodeTypes: "debug,inject",
 	});
 	assert.equal(explicit.ignoredNodeTypes, "debug,catch,inject");
+});
+
+test("resolveOpenTelemetryConfig preserves explicit empty ignoredNodeTypes", () => {
+	delete process.env.IGNORED_NODE_TYPES;
+	const config = resolveOpenTelemetryConfig({ ignoredNodeTypes: "" });
+	assert.equal(config.ignoredNodeTypes, "");
 });
 
 test("resolveOpenTelemetryConfig appends signal paths for specific endpoints without path", () => {

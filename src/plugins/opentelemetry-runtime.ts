@@ -495,8 +495,8 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 	const metricsProtocol = resolvedMetricsProtocol || configuredProtocol;
 	const logsProtocol = resolvedLogsProtocol || configuredProtocol;
 	const configuredLogLevel =
-		resolveLogLevel(config.logLevel) ||
 		resolveLogLevel(logLevelEnv) ||
+		resolveLogLevel(config.logLevel) ||
 		DEFAULT_LOG_LEVEL;
 	const configuredTraceUrl = ensureSignalPath(
 		config.url || DEFAULT_OTEL_TRACE_URL,
@@ -543,7 +543,9 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 		logsEnabled: config.logsEnabled ?? false,
 		rootPrefix: config.rootPrefix ?? DEFAULT_ROOT_SPAN_NAME_PREFIX,
 		ignoredNodeTypes:
-			ignoredNodeTypesEnv || config.ignoredNodeTypes || DEFAULT_IGNORED_NODE_TYPES,
+			ignoredNodeTypesEnv ??
+			config.ignoredNodeTypes ??
+			DEFAULT_IGNORED_NODE_TYPES,
 		propagateHeaderNodeTypes:
 			config.propagateHeaderNodeTypes ?? DEFAULT_PROPAGATE_HEADER_NODE_TYPES,
 		logLevel: configuredLogLevel,
