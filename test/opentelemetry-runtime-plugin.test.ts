@@ -2,10 +2,17 @@
 const Module = require("node:module");
 const path = require("node:path");
 const stubPath = path.join(process.cwd(), "test", "stubs", "node-red-util.cjs");
+const exporterStubPath = path.join(process.cwd(), "test", "stubs", "otel-exporters.cjs");
 const originalResolveFilename = Module._resolveFilename;
 Module._resolveFilename = function (request, parent, isMain, options) {
 	if (request === "@node-red/util") {
 		return stubPath;
+	}
+	if (
+		typeof request === "string" &&
+		request.startsWith("@opentelemetry/exporter-")
+	) {
+		return exporterStubPath;
 	}
 	return originalResolveFilename.call(this, request, parent, isMain, options);
 };
@@ -39,6 +46,7 @@ const {
 	resolveOpenTelemetryConfig,
 	maskUrlCredentials,
 	formatStartupConfigSummary,
+	pluginLog,
 	getSharedState,
 } = otelModule.__test__;
 
@@ -308,6 +316,30 @@ test("resolveOpenTelemetryConfig gives env log level precedence over explicit co
 	assert.equal(config.logLevel, "error");
 });
 
+test("resolveOpenTelemetryConfig falls back to Node-RED logging level when env and plugin logLevel are unset", () => {
+	const config = resolveOpenTelemetryConfig(
+		{},
+		{ logging: { console: { level: "debug" } } },
+	);
+	assert.equal(config.logLevel, "debug");
+});
+
+test("resolveOpenTelemetryConfig maps Node-RED fatal logging level to plugin error", () => {
+	const config = resolveOpenTelemetryConfig(
+		{},
+		{ logging: { console: { level: "fatal" } } },
+	);
+	assert.equal(config.logLevel, "error");
+});
+
+test("resolveOpenTelemetryConfig gives explicit plugin logLevel precedence over Node-RED logging level", () => {
+	const config = resolveOpenTelemetryConfig(
+		{ logLevel: "trace" },
+		{ logging: { console: { level: "warn" } } },
+	);
+	assert.equal(config.logLevel, "trace");
+});
+
 test("resolveOpenTelemetryConfig reads ignoredNodeTypes from env variable", () => {
 	process.env.IGNORED_NODE_TYPES = "debug,catch,inject";
 	const config = resolveOpenTelemetryConfig({});
@@ -528,33 +560,45 @@ test("deleteOutdatedMsgSpans removes outdated entries", () => {
 	assert.ok(parentSpan.endTimestamp <= now - 100);
 });
 
-test("logEvent should not log when logging is disabled", () => {
+test("logEvent forwards diagnostic debug logs to Node-RED even when plugin log level is off", () => {
 	setLogLevel("off");
-	const consoleLogSpy = test.mock.method(console, "log");
-	logEvent(mockRed, {}, "test", {});
-	assert.equal(consoleLogSpy.mock.calls.length, 0);
+	const logSpy = test.mock.method(nodeRedUtilStub.log, "log");
+	const sharedState = getSharedState();
+	sharedState.nodeRedLogApi = nodeRedUtilStub.log;
+	logEvent(mockRed, {}, "test", { msg: { _msgid: "1" } });
+	assert.equal(logSpy.mock.calls.length, 1);
+	assert.equal(logSpy.mock.calls[0].arguments[0].level, nodeRedUtilStub.log.DEBUG);
 });
 
 test("logEvent respects debug log level", () => {
 	setLogLevel("debug");
-	const consoleLogSpy = test.mock.method(console, "log");
+	const logSpy = test.mock.method(nodeRedUtilStub.log, "log");
+	const sharedState = getSharedState();
+	sharedState.nodeRedLogApi = nodeRedUtilStub.log;
 	logEvent(mockRed, {}, "test", { msg: { _msgid: "1" } });
-	assert.equal(consoleLogSpy.mock.calls.length, 1);
+	assert.equal(logSpy.mock.calls.length, 1);
 });
 
-test("logEvent does not write debug output when level is warn", () => {
+test("logEvent forwards diagnostic debug logs to Node-RED when plugin log level is warn", () => {
 	setLogLevel("warn");
-	const consoleLogSpy = test.mock.method(console, "log");
+	const logSpy = test.mock.method(nodeRedUtilStub.log, "log");
+	const sharedState = getSharedState();
+	sharedState.nodeRedLogApi = nodeRedUtilStub.log;
 	logEvent(mockRed, {}, "test", { msg: { _msgid: "1" } });
-	assert.equal(consoleLogSpy.mock.calls.length, 0);
+	assert.equal(logSpy.mock.calls.length, 1);
+	assert.equal(logSpy.mock.calls[0].arguments[0].level, nodeRedUtilStub.log.DEBUG);
 });
 
-test("logEvent emits structured OTel logs even when console log level is warn", () => {
+test("logEvent respects logLevel for structured OTel logs", () => {
 	setLogLevel("warn");
 	const logger = { emit: () => {} };
 	const emitSpy = test.mock.method(logger, "emit");
 	const sharedState = getSharedState();
 	sharedState.logger = logger;
+	logEvent(mockRed, {}, "test", { msg: { _msgid: "1" } });
+	assert.equal(emitSpy.mock.calls.length, 0);
+
+	setLogLevel("info");
 	logEvent(mockRed, {}, "test", { msg: { _msgid: "1" } });
 	assert.equal(emitSpy.mock.calls.length, 1);
 });
@@ -1234,7 +1278,7 @@ test("postDeliver.otel hook injects trace context for http and mqtt", async () =
 			rootPrefix: "",
 			ignoredNodeTypes: "",
 			propagateHeaderNodeTypes: "http request,mqtt out",
-			logLevel: "off",
+			logLevel: "error",
 			timeout: 10,
 			attributeMappings: [],
 		},
@@ -1276,7 +1320,7 @@ test("preDeliver.otel hook clears all propagated trace headers safely", async ()
 			rootPrefix: "",
 			ignoredNodeTypes: "",
 			propagateHeaderNodeTypes: "function",
-			logLevel: "off",
+			logLevel: "error",
 			timeout: 10,
 			attributeMappings: [],
 		},
@@ -1390,7 +1434,7 @@ test("runtime plugin registers and removes Node-RED runtime log handler with log
 			logsUrl: "http://localhost:4318/v1/logs",
 			tracesEnabled: false,
 			metricsEnabled: false,
-			logLevel: "off",
+			logLevel: "error",
 		},
 	});
 	assert.equal(nodeRedUtilStub.log.handlerCount(), 1);
@@ -1400,7 +1444,7 @@ test("runtime plugin registers and removes Node-RED runtime log handler with log
 			logsUrl: "http://localhost:4318/v1/logs",
 			tracesEnabled: false,
 			metricsEnabled: false,
-			logLevel: "off",
+			logLevel: "error",
 		},
 	});
 	assert.equal(nodeRedUtilStub.log.handlerCount(), 0);
@@ -1417,7 +1461,7 @@ test("runtime plugin forwards Node-RED runtime logs to OTel logger", async () =>
 			logsUrl: "http://localhost:4318/v1/logs",
 			tracesEnabled: false,
 			metricsEnabled: false,
-			logLevel: "off",
+			logLevel: "error",
 		},
 	});
 	const logger = getSharedState().logger;
@@ -1440,6 +1484,44 @@ test("runtime plugin forwards Node-RED runtime logs to OTel logger", async () =>
 	await runtimePlugin.onClose();
 });
 
+test("runtime plugin should filter Trace logs when logLevel is warn", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			logsEnabled: true,
+			logsUrl: "http://localhost:4318/v1/logs",
+			tracesEnabled: false,
+			metricsEnabled: false,
+			logLevel: "warn",
+		},
+	});
+	const logger = getSharedState().logger;
+	assert.ok(logger);
+	const emitSpy = test.mock.method(logger, "emit");
+
+	// Emit a TRACE log (should be filtered)
+	nodeRedUtilStub.log.emit({
+		level: nodeRedUtilStub.log.TRACE,
+		msg: "This is a trace log",
+		type: "runtime",
+	});
+
+	assert.equal(emitSpy.mock.calls.length, 0);
+
+	// Emit an ERROR log (should NOT be filtered)
+	nodeRedUtilStub.log.emit({
+		level: nodeRedUtilStub.log.ERROR,
+		msg: "This is an error log",
+		type: "runtime",
+	});
+
+	assert.equal(emitSpy.mock.calls.length, 1);
+	assert.equal(emitSpy.mock.calls[0].arguments[0].severityText, "ERROR");
+
+	await runtimePlugin.onClose();
+});
+
 test("runtime plugin maps numeric Node-RED levels to OTel severity", async () => {
 	const { runtimePlugin } = createPluginHarness(false);
 	assert.ok(runtimePlugin);
@@ -1449,7 +1531,7 @@ test("runtime plugin maps numeric Node-RED levels to OTel severity", async () =>
 			logsUrl: "http://localhost:4318/v1/logs",
 			tracesEnabled: false,
 			metricsEnabled: false,
-			logLevel: "off",
+			logLevel: "error",
 		},
 	});
 	const logger = getSharedState().logger;
@@ -1462,6 +1544,123 @@ test("runtime plugin maps numeric Node-RED levels to OTel severity", async () =>
 	});
 	assert.equal(emitSpy.mock.calls.length, 1);
 	assert.equal(emitSpy.mock.calls[0].arguments[0].severityText, "ERROR");
+	await runtimePlugin.onClose();
+});
+
+test("runtime plugin should exhaustively filter logs based on logLevel", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
+	assert.ok(runtimePlugin);
+	const logger = { emit: () => {} };
+	const emitSpy = test.mock.method(logger, "emit");
+	const sharedState = getSharedState();
+	sharedState.logger = logger;
+
+	const levels = [
+		{ name: "FATAL", nr: nodeRedUtilStub.log.FATAL },
+		{ name: "ERROR", nr: nodeRedUtilStub.log.ERROR },
+		{ name: "WARN", nr: nodeRedUtilStub.log.WARN },
+		{ name: "INFO", nr: nodeRedUtilStub.log.INFO },
+		{ name: "DEBUG", nr: nodeRedUtilStub.log.DEBUG },
+		{ name: "TRACE", nr: nodeRedUtilStub.log.TRACE },
+	];
+
+	const testMatrix = [
+		{
+			configLevel: "off",
+			expected: {
+				FATAL: false,
+				ERROR: false,
+				WARN: false,
+				INFO: false,
+				DEBUG: false,
+				TRACE: false,
+			},
+		},
+		{
+			configLevel: "error",
+			expected: {
+				FATAL: true,
+				ERROR: true,
+				WARN: false,
+				INFO: false,
+				DEBUG: false,
+				TRACE: false,
+			},
+		},
+		{
+			configLevel: "warn",
+			expected: {
+				FATAL: true,
+				ERROR: true,
+				WARN: true,
+				INFO: false,
+				DEBUG: false,
+				TRACE: false,
+			},
+		},
+		{
+			configLevel: "info",
+			expected: {
+				FATAL: true,
+				ERROR: true,
+				WARN: true,
+				INFO: true,
+				DEBUG: false,
+				TRACE: false,
+			},
+		},
+		{
+			configLevel: "debug",
+			expected: {
+				FATAL: true,
+				ERROR: true,
+				WARN: true,
+				INFO: true,
+				DEBUG: true,
+				TRACE: false,
+			},
+		},
+		{
+			configLevel: "trace",
+			expected: {
+				FATAL: true,
+				ERROR: true,
+				WARN: true,
+				INFO: true,
+				DEBUG: true,
+				TRACE: true,
+			},
+		},
+	];
+
+	for (const { configLevel, expected } of testMatrix) {
+		await runtimePlugin.onSettings({
+			opentelemetry: {
+				logsEnabled: true,
+				logsUrl: "http://localhost:4318/v1/logs",
+				logLevel: configLevel,
+			},
+		});
+		// Re-mock logger because onSettings might have replaced it
+		sharedState.logger = logger;
+
+		for (const level of levels) {
+			emitSpy.mock.resetCalls();
+			nodeRedUtilStub.log.emit({
+				level: level.nr,
+				msg: `Test ${level.name} at ${configLevel}`,
+				type: "runtime",
+			});
+
+			const shouldBeEmitted = (expected as any)[level.name];
+			assert.equal(
+				emitSpy.mock.calls.length,
+				shouldBeEmitted ? 1 : 0,
+				`Level ${level.name} should ${shouldBeEmitted ? "" : "NOT "}be emitted when logLevel is ${configLevel}`,
+			);
+		}
+	}
+
 	await runtimePlugin.onClose();
 });
 
@@ -1644,7 +1843,7 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 			rootPrefix: "",
 			ignoredNodeTypes: "",
 			propagateHeaderNodeTypes: "",
-			logLevel: "off",
+			logLevel: "error",
 			timeout: 10,
 			attributeMappings: [],
 		},
@@ -1760,6 +1959,38 @@ test("endSpan keeps parent active when remaining child span is non-orphan", () =
 	const parent = getMsgSpans().get("active-child-msg");
 	assert.ok(parent);
 	assert.equal(parent.spans.has("active-child-msg#function-node-b"), true);
+});
+
+test("pluginLog should use Node-RED log API when available", () => {
+	const logSpy = test.mock.method(nodeRedUtilStub.log, "log");
+	const sharedState = getSharedState();
+	sharedState.nodeRedLogApi = nodeRedUtilStub.log;
+
+	setLogLevel("debug");
+	
+	pluginLog("info", "test info message");
+	assert.equal(logSpy.mock.calls.length, 1);
+	assert.equal(logSpy.mock.calls[0].arguments[0].msg, "test info message");
+	assert.equal(logSpy.mock.calls[0].arguments[0].level, nodeRedUtilStub.log.INFO);
+
+	logSpy.mock.resetCalls();
+	pluginLog("error", "test error message", new Error("boom"));
+	assert.equal(logSpy.mock.calls.length, 1);
+	assert.match(logSpy.mock.calls[0].arguments[0].msg, /test error message Error: boom/);
+	assert.equal(logSpy.mock.calls[0].arguments[0].level, nodeRedUtilStub.log.ERROR);
+});
+
+test("pluginLog should not apply plugin log-level filtering", () => {
+	const logSpy = test.mock.method(nodeRedUtilStub.log, "log");
+	const sharedState = getSharedState();
+	sharedState.nodeRedLogApi = nodeRedUtilStub.log;
+
+	setLogLevel("off");
+	pluginLog("info", "still forwarded");
+
+	assert.equal(logSpy.mock.calls.length, 1);
+	assert.equal(logSpy.mock.calls[0].arguments[0].msg, "still forwarded");
+	assert.equal(logSpy.mock.calls[0].arguments[0].level, nodeRedUtilStub.log.INFO);
 });
 
 

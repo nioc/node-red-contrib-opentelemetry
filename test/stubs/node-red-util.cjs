@@ -2,7 +2,6 @@ const handlers = new Set();
 
 module.exports = {
 	log: {
-		log: () => {},
 		FATAL: 10,
 		ERROR: 20,
 		WARN: 30,
@@ -17,6 +16,7 @@ module.exports = {
 		removeHandler: (handler) => {
 			handlers.delete(handler);
 		},
+		log: () => {},
 		emit: (entry) => {
 			for (const handler of handlers) {
 				if (handler && typeof handler.emit === "function") {
