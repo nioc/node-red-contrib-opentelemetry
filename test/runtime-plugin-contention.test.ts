@@ -3,10 +3,17 @@ const Module = require("node:module");
 const path = require("node:path");
 
 const stubPath = path.join(process.cwd(), "test", "stubs", "node-red-util.cjs");
+const exporterStubPath = path.join(process.cwd(), "test", "stubs", "otel-exporters.cjs");
 const originalResolveFilename = Module._resolveFilename;
 Module._resolveFilename = function (request, parent, isMain, options) {
 	if (request === "@node-red/util") {
 		return stubPath;
+	}
+	if (
+		typeof request === "string" &&
+		request.startsWith("@opentelemetry/exporter-")
+	) {
+		return exporterStubPath;
 	}
 	return originalResolveFilename.call(this, request, parent, isMain, options);
 };
@@ -14,7 +21,6 @@ Module._resolveFilename = function (request, parent, isMain, options) {
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const otelModule = require("../src/plugins/opentelemetry-runtime");
-Module._resolveFilename = originalResolveFilename;
 
 const nextTick = () => new Promise((resolve) => setImmediate(resolve));
 

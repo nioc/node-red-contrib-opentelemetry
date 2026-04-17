@@ -52,7 +52,7 @@ Restart Node-RED after changing these settings.
 - `rootPrefix`: Prefix added to root span names.
 - `ignoredNodeTypes`: Comma-separated node types excluded from tracing.
 - `propagateHeaderNodeTypes`: Comma-separated node types for context propagation.
-- `logLevel`: `off`, `error`, `warn`, `info`, or `debug`.
+- `logLevel`: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
 - `timeout`: Span cleanup timeout (seconds).
 - `attributeMappings`: Custom span attributes from `msg` via JMESPath.
 

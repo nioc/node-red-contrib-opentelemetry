@@ -142,7 +142,7 @@ interface ResolvedOTELConfig {
 	rootPrefix: string;
 	ignoredNodeTypes: string;
 	propagateHeaderNodeTypes: string;
-	logLevel: "off" | "error" | "warn" | "info" | "debug";
+	logLevel: "off" | "error" | "warn" | "info" | "debug" | "trace";
 	timeout: number;
 	attributeMappings: AttributeMapping[];
 }
@@ -223,6 +223,7 @@ type NodeRedUtilLogApi = {
 	METRIC?: unknown;
 	addHandler?: (handler: EventEmitter) => void;
 	removeHandler?: (handler: EventEmitter) => void;
+	log: (entry: NodeRedLogEntry) => void;
 };
 type NodeRedLogEntry = {
 	level?: unknown;
@@ -243,7 +244,7 @@ type RuntimeApi = NodeAPI & {
  * Shared state structure for all node instances
  */
 interface SharedState {
-	logLevel: "off" | "error" | "warn" | "info" | "debug";
+	logLevel: "off" | "error" | "warn" | "info" | "debug" | "trace";
 	rootPrefix: string;
 	timeout: number;
 	attributeMappings: AttributeMapping[];
@@ -266,7 +267,7 @@ interface SharedState {
 
 // Shared state for all node instances
 const sharedState: SharedState = {
-	logLevel: "warn",
+	logLevel: "info",
 	rootPrefix: "",
 	timeout: 10_000,
 	attributeMappings: [],
@@ -294,7 +295,7 @@ const DEFAULT_OTEL_GRPC_URL = "http://localhost:4317";
 const DEFAULT_OTEL_PROTOCOL = "http";
 const DEFAULT_OTEL_SERVICE_NAME = "Node-RED";
 const DEFAULT_ROOT_SPAN_NAME_PREFIX = "";
-const DEFAULT_IGNORED_NODE_TYPES = "debug,catch";
+const DEFAULT_IGNORED_NODE_TYPES = "inject,debug,catch";
 const DEFAULT_PROPAGATE_HEADER_NODE_TYPES = "";
 const DEFAULT_LOG_LEVEL = "warn";
 const DEFAULT_TIMEOUT_SECONDS = 10;
@@ -305,6 +306,7 @@ const LOG_LEVEL_PRIORITY = {
 	warn: 2,
 	info: 3,
 	debug: 4,
+	trace: 5,
 } as const;
 
 type LogLevel = keyof typeof LOG_LEVEL_PRIORITY;
@@ -428,9 +430,67 @@ function resolveLogLevel(value: string | undefined): LogLevel | undefined {
 		case "warn":
 		case "info":
 		case "debug":
+		case "trace":
 			return normalized;
 		default:
 			return undefined;
+	}
+}
+
+function resolveNodeRedLogLevel(settings: unknown): LogLevel | undefined {
+	if (!settings || typeof settings !== "object") {
+		return undefined;
+	}
+	const logging = (settings as { logging?: unknown }).logging;
+	if (!logging || typeof logging !== "object") {
+		return undefined;
+	}
+	const loggingRecord = logging as Record<string, unknown>;
+	const candidateLevels: unknown[] = [
+		(loggingRecord.console as { level?: unknown } | undefined)?.level,
+		loggingRecord.level,
+	];
+	for (const [key, value] of Object.entries(loggingRecord)) {
+		if (key === "console" || key === "level") {
+			continue;
+		}
+		if (value && typeof value === "object") {
+			candidateLevels.push((value as { level?: unknown }).level);
+		}
+	}
+	for (const levelValue of candidateLevels) {
+		const normalized = String(levelValue ?? "")
+			.trim()
+			.toLowerCase();
+		if (!normalized) {
+			continue;
+		}
+		if (normalized === "fatal") {
+			return "error";
+		}
+		const resolved = resolveLogLevel(normalized);
+		if (resolved) {
+			return resolved;
+		}
+	}
+	return undefined;
+}
+
+function mapNodeRedLevelToPluginLevel(severityText: string): LogLevel {
+	switch (severityText) {
+		case "FATAL":
+		case "ERROR":
+			return "error";
+		case "WARN":
+			return "warn";
+		case "INFO":
+			return "info";
+		case "DEBUG":
+			return "debug";
+		case "TRACE":
+			return "trace";
+		default:
+			return "info";
 	}
 }
 
@@ -467,12 +527,31 @@ function shouldLog(requiredLevel: LogLevel): boolean {
 	);
 }
 
-function consoleLog(
+function pluginLog(
 	level: Exclude<LogLevel, "off">,
 	message: string,
 	error?: unknown,
 ): void {
-	if (!shouldLog(level)) {
+	const logApi = getNodeRedUtilLogApi();
+	const body = error !== undefined ? `${message} ${stringifyLogBody(error)}` : message;
+	if (logApi) {
+		switch (level) {
+			case "error":
+				logApi.log({ level: logApi.ERROR, msg: body });
+				break;
+			case "warn":
+				logApi.log({ level: logApi.WARN, msg: body });
+				break;
+			case "info":
+				logApi.log({ level: logApi.INFO, msg: body });
+				break;
+			case "debug":
+				logApi.log({ level: logApi.DEBUG, msg: body });
+				break;
+			case "trace":
+				logApi.log({ level: logApi.TRACE, msg: body });
+				break;
+		}
 		return;
 	}
 	switch (level) {
@@ -492,6 +571,7 @@ function consoleLog(
 			break;
 		case "info":
 		case "debug":
+		case "trace":
 			if (error !== undefined) {
 				console.log(message, error);
 			} else {
@@ -591,6 +671,9 @@ function emitNodeRedRuntimeLog(entry: NodeRedLogEntry): void {
 		entry.level,
 		logApi,
 	);
+	if (!shouldLog(mapNodeRedLevelToPluginLevel(severityText))) {
+		return;
+	}
 	const attributes: Record<string, string | number> = {
 		"node_red.event_type": "runtime.log",
 		"node_red.log.level": severityText.toLowerCase(),
@@ -624,7 +707,7 @@ function unregisterNodeRedLogHandler(): void {
 	try {
 		logApi?.removeHandler?.(sharedState.nodeRedLogHandler);
 	} catch (error) {
-		consoleLog("debug", "Failed to remove Node-RED log handler", error);
+		pluginLog("debug", "Failed to remove Node-RED log handler", error);
 	}
 	sharedState.nodeRedLogHandler.removeAllListeners("log");
 	sharedState.nodeRedLogHandler = null;
@@ -643,14 +726,14 @@ function registerNodeRedLogHandler(): void {
 		try {
 			emitNodeRedRuntimeLog(entry);
 		} catch (error) {
-			consoleLog("debug", "Failed to emit Node-RED runtime log", error);
+			pluginLog("debug", "Failed to emit Node-RED runtime log", error);
 		}
 	});
 	try {
 		logApi.addHandler(handler);
 		sharedState.nodeRedLogHandler = handler;
 	} catch (error) {
-		consoleLog("warn", "Failed to register Node-RED log handler", error);
+		pluginLog("warn", "Failed to register Node-RED log handler", error);
 	}
 }
 
@@ -708,7 +791,10 @@ function formatStartupConfigSummary(config: ResolvedOTELConfig): string {
 	].join(", ");
 }
 
-function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
+function resolveOpenTelemetryConfig(
+	config: OTELConfig,
+	nodeRedSettings?: unknown,
+): ResolvedOTELConfig {
 	const env = process.env;
 	const tracesEndpoint = env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT;
 	const metricsEndpoint = env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT;
@@ -757,9 +843,11 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 	const tracesProtocol = resolvedTracesProtocol || configuredProtocol;
 	const metricsProtocol = resolvedMetricsProtocol || configuredProtocol;
 	const logsProtocol = resolvedLogsProtocol || configuredProtocol;
+	const nodeRedLogLevel = resolveNodeRedLogLevel(nodeRedSettings);
 	const configuredLogLevel =
 		resolveLogLevel(logLevelEnv) ||
 		resolveLogLevel(config.logLevel) ||
+		nodeRedLogLevel ||
 		DEFAULT_LOG_LEVEL;
 	const configuredGenericEndpoint = config.url || undefined;
 	const configuredMetricsEndpoint = config.metricsUrl || undefined;
@@ -1074,18 +1162,41 @@ function logEvent(
 	eventType: string,
 	event: RuntimeHookEvent,
 ): void {
-	const emitConsole = shouldLog("debug");
-	// Structured OTel logs follow the logs signal enablement (logger presence),
-	// while logLevel controls plugin diagnostics written to console.
-	const emitOtelLogger = sharedState.logger && sharedState.flowEventLogsEnabled;
-	if (!emitConsole && !emitOtelLogger) {
+	if (!event.msg) {
 		return;
 	}
+	// Structured OTel logs follow the logs signal enablement (logger presence),
+	// while logLevel controls plugin diagnostics written to Node-RED log or console.
+	// We also respect logLevel for OTel logs to avoid flooding the backend.
+	const emitOtelLogger =
+		sharedState.logger &&
+		sharedState.flowEventLogsEnabled &&
+		shouldLog("info");
+
+	// Diagnostic logging to Node-RED/console is delegated to Node-RED log settings in pluginLog.
+	// We call it at 'debug' level for flow events.
+	const msgId = getMsgId(event.msg);
+	const _msgId = event.msg._msgid;
+	const flowName = event.msg.z ? getFlowName(RED, event.msg.z) : undefined;
+	let logMsg = `rootMsgId: ${msgId}, _msgId: ${_msgId}:`;
+
+	if (event.source?.node) {
+		logMsg += ` src: ${event.source.node.type} ${event.source.node.id}`;
+	}
+	if (event.destination?.node) {
+		logMsg += ` >> dest: ${event.destination.node.type} ${event.destination.node.id}`;
+	}
+	if (event.node?.node) {
+		logMsg += ` ## node: ${event.node.node.type} ${event.node.node.id}`;
+	}
+
+	pluginLog("debug", `${eventType}: ${logMsg}`);
+
+	if (!emitOtelLogger) {
+		return;
+	}
+
 	try {
-		const msgId = getMsgId(event.msg);
-		const _msgId = event.msg._msgid;
-		const flowName = event.msg.z ? getFlowName(RED, event.msg.z) : undefined;
-		let logMsg = `rootMsgId: ${msgId}, _msgId: ${_msgId}:`;
 		const attributes: Record<string, string> = {
 			[ATTR_MSG_ID]: msgId,
 			"node_red.msg._msgid": _msgId,
@@ -1096,26 +1207,19 @@ function logEvent(
 		}
 
 		if (event.source?.node) {
-			logMsg += ` src: ${event.source.node.type} ${event.source.node.id}`;
 			attributes[ATTR_NODE_ID] = event.source.node.id;
 			attributes[ATTR_NODE_TYPE] = event.source.node.type;
 		}
 		if (event.destination?.node) {
-			logMsg += ` >> dest: ${event.destination.node.type} ${event.destination.node.id}`;
 			attributes["node_red.destination.id"] = event.destination.node.id;
 			attributes["node_red.destination.type"] = event.destination.node.type;
 		}
 		if (event.node?.node) {
-			logMsg += ` ## node: ${event.node.node.type} ${event.node.node.id}`;
 			attributes[ATTR_NODE_ID] = event.node.node.id;
 			attributes[ATTR_NODE_TYPE] = event.node.node.type;
 		}
 
-		if (emitConsole) {
-			consoleLog("debug", `${eventType}: ${logMsg}`);
-		}
-
-		if (emitOtelLogger && sharedState.logger) {
+		if (sharedState.logger) {
 			sharedState.logger.emit({
 				severityNumber: SeverityNumber.INFO,
 				severityText: "INFO",
@@ -1125,7 +1229,7 @@ function logEvent(
 			});
 		}
 	} catch (error) {
-		consoleLog("error", `An error occurred during logging ${eventType}`, error);
+		pluginLog("error", `An error occurred during logging ${eventType}`, error);
 	}
 }
 
@@ -1148,7 +1252,7 @@ function deleteOutdatedMsgSpans(): void {
 		for (const [msgId, msgSpan] of msgSpans) {
 			if (msgSpan.updateTimestamp < now - sharedState.timeout) {
 				// ending parent span and remove it
-				consoleLog(
+				pluginLog(
 					"debug",
 					`Parent span "${msgSpan.parentSpan.name}" ${msgId} is outdated, ending`,
 				);
@@ -1159,7 +1263,7 @@ function deleteOutdatedMsgSpans(): void {
 			}
 		}
 	} catch (error) {
-		consoleLog("error", "An error occurred during span cleaning", error);
+		pluginLog("error", "An error occurred during span cleaning", error);
 	}
 }
 
@@ -1208,7 +1312,7 @@ function parseAttribute(
 					attributes[mapping.key] = result;
 				}
 			} catch (error) {
-				consoleLog(
+				pluginLog(
 					"warn",
 					`An error occurred during span attribute parsing (key: ${mapping.key}, path: ${mapping.path}): ${(error as Error).message}`,
 				);
@@ -1386,7 +1490,7 @@ function createSpan(
 			);
 			parentSpan = createdParent.parentSpan;
 			ctx = createdParent.context;
-			consoleLog("debug", `=> Created parent span for ${nodeDefinition.type}`);
+			pluginLog("debug", `=> Created parent span for ${nodeDefinition.type}`);
 		}
 
 		if (isNotTraced) {
@@ -1398,7 +1502,7 @@ function createSpan(
 			nodeDefinition.z,
 			nodeDefinition.type,
 		);
-		consoleLog(
+		pluginLog(
 			"debug",
 			`Local span attributes (start) for ${nodeDefinition.id}, ${nodeDefinition.type}: ${JSON.stringify(localAttributes)}`,
 		);
@@ -1432,7 +1536,7 @@ function createSpan(
 			}
 		}
 
-		consoleLog("debug", `=> Created span for ${nodeDefinition.type}`);
+		pluginLog("debug", `=> Created span for ${nodeDefinition.type}`);
 
 		// store child span
 		const parent = msgSpans.get(msgId);
@@ -1442,7 +1546,7 @@ function createSpan(
 		}
 		return span;
 	} catch (error) {
-		consoleLog("error", "An error occurred during span creation", error);
+		pluginLog("error", "An error occurred during span creation", error);
 	}
 }
 
@@ -1552,7 +1656,7 @@ function applyLocalEndAttributes(
 	for (const [key, value] of Object.entries(localAttributes)) {
 		span?.setAttribute(key, value);
 	}
-	consoleLog(
+	pluginLog(
 		"debug",
 		`Local span attributes (end) for ${nodeDefinition.id}, ${nodeDefinition.type}: ${JSON.stringify(localAttributes)}`,
 	);
@@ -1621,10 +1725,10 @@ function cleanupOrphanSpansIfNeeded(
 		return;
 	}
 	for (const [orphanSpanId] of parent.spans) {
-		consoleLog("debug", `Orphan span to delete: ${orphanSpanId}`);
+		pluginLog("debug", `Orphan span to delete: ${orphanSpanId}`);
 		parent.spans.delete(orphanSpanId);
 	}
-	consoleLog(
+	pluginLog(
 		"debug",
 		`Parent span "${(parent.parentSpan as Span & OTelSpanExtension).name ?? ""}" no longer has child span, ending`,
 	);
@@ -1677,7 +1781,7 @@ function endSpan(
 		span?.end();
 		const currentSpanCreationTimestamp = (span as Span & OTelSpanExtension)
 			?._creationTimestamp;
-		consoleLog(
+		pluginLog(
 			"debug",
 			`==> Ended span for ${nodeDefinition.id} ${nodeDefinition.type}`,
 		);
@@ -1685,7 +1789,7 @@ function endSpan(
 		parent.updateTimestamp = Date.now();
 		cleanupOrphanSpansIfNeeded(msgId, parent, currentSpanCreationTimestamp);
 	} catch (error) {
-		consoleLog("error", "An error occurred during span ending", error);
+		pluginLog("error", "An error occurred during span ending", error);
 	}
 }
 
@@ -1756,7 +1860,7 @@ function initializeTracerProvider(
 		tracerRegistered = false;
 	}
 	if (!tracerRegistered) {
-		consoleLog(
+		pluginLog(
 			"warn",
 			"OpenTelemetry tracer provider is already configured globally; using local tracer provider for this node.",
 		);
@@ -1813,7 +1917,7 @@ function initializeMeterProvider(
 		meterRegistered = false;
 	}
 	if (!meterRegistered) {
-		consoleLog(
+		pluginLog(
 			"warn",
 			"OpenTelemetry meter provider is already configured globally; using local meter provider for this node.",
 		);
@@ -1873,7 +1977,7 @@ function initializeLoggerProvider(
 		selectedLoggerProvider = logs.getLoggerProvider();
 	}
 	if (selectedLoggerProvider !== loggerProvider) {
-		consoleLog(
+		pluginLog(
 			"warn",
 			"OpenTelemetry logger provider is already configured globally; using local logger provider for this node.",
 		);
@@ -1888,7 +1992,7 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 		typeof RED.hooks.add !== "function" ||
 		typeof RED.hooks.remove !== "function"
 	) {
-		consoleLog(
+		pluginLog(
 			"warn",
 			"Node-RED hooks API is unavailable; runtime hooks were not registered.",
 		);
@@ -1984,7 +2088,7 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 			const spanId = getSpanId(sendEvent.msg, sendEvent.source.node);
 			const parent = msgSpans.get(msgId);
 			if (parent?.spans.has(spanId)) {
-				consoleLog("debug", `Switch or subflow span ${spanId} will be ended`);
+				pluginLog("debug", `Switch or subflow span ${spanId} will be ended`);
 				parent.spans.get(spanId)?.end();
 				parent.spans.delete(spanId);
 			}
@@ -2018,7 +2122,7 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 	);
 
 	sharedState.hooksRegistered = true;
-	consoleLog("info", "OpenTelemetry startup: runtime hooks registered");
+	pluginLog("info", "OpenTelemetry startup: runtime hooks registered");
 	sharedState.intervalId = setInterval(deleteOutdatedMsgSpans, 5000);
 }
 
@@ -2055,14 +2159,14 @@ module.exports = (RED: RuntimeApi) => {
 			RED.plugins?.registerPlugin?.(id, plugin);
 		} catch (error) {
 			if (!isAlreadyRegisteredError(error)) {
-				consoleLog(
+				pluginLog(
 					"error",
 					"Failed to register Node-RED runtime plugin 'opentelemetry-runtime'.",
 					error,
 				);
 				throw error;
 			}
-			consoleLog(
+			pluginLog(
 				"debug",
 				"Node-RED runtime plugin already registered; skipping duplicate registration.",
 			);
@@ -2072,9 +2176,12 @@ module.exports = (RED: RuntimeApi) => {
 	 * Initialize the OpenTelemetry system from runtime plugin settings.
 	 * @param {OTELConfig} config Optional configuration to override defaults
 	 */
-	async function initOTEL(config: OTELConfig = {}): Promise<void> {
+	async function initOTEL(
+		config: OTELConfig = {},
+		nodeRedSettings?: unknown,
+	): Promise<void> {
 		// get config
-		const resolvedConfig = resolveOpenTelemetryConfig(config);
+		const resolvedConfig = resolveOpenTelemetryConfig(config, nodeRedSettings);
 		const {
 			url,
 			metricsUrl,
@@ -2088,11 +2195,11 @@ module.exports = (RED: RuntimeApi) => {
 			logsEnabled,
 		} = resolvedConfig;
 		applyResolvedRuntimeConfig(resolvedConfig);
-		consoleLog(
+		pluginLog(
 			"warn",
 			`OpenTelemetry startup config: ${formatStartupConfigSummary(resolvedConfig)}`,
 		);
-		consoleLog(
+		pluginLog(
 			"debug",
 			`OpenTelemetry startup endpoints: traces(${tracesProtocol})=${url ? maskUrlCredentials(url) : "disabled"}, metrics(${metricsProtocol})=${metricsUrl ? maskUrlCredentials(metricsUrl) : "disabled"}, logs(${logsProtocol})=${logsUrl ? maskUrlCredentials(logsUrl) : "disabled"}`,
 		);
@@ -2101,7 +2208,7 @@ module.exports = (RED: RuntimeApi) => {
 			sharedState.meterProvider ||
 			sharedState.loggerProvider
 		) {
-			consoleLog("debug", "OpenTelemetry startup: replacing existing providers");
+			pluginLog("debug", "OpenTelemetry startup: replacing existing providers");
 			await shutdownSignalProviders();
 		}
 		const commonResource = createCommonResource(serviceName);
@@ -2159,10 +2266,10 @@ module.exports = (RED: RuntimeApi) => {
 				if (typeof settings === "object" && settings !== null) {
 					pluginConfig = settings as OTELConfig;
 				}
-				await initOTEL(pluginConfig);
+				await initOTEL(pluginConfig, RED.settings);
 				runtimePluginInitialized = true;
 			} catch (error) {
-				consoleLog("error", "OpenTelemetry runtime plugin settings failed.", error);
+				pluginLog("error", "OpenTelemetry runtime plugin settings failed.", error);
 			}
 		};
 
@@ -2174,7 +2281,7 @@ module.exports = (RED: RuntimeApi) => {
 				await stopOTEL();
 				runtimePluginInitialized = false;
 			} catch (error) {
-				consoleLog("error", "OpenTelemetry runtime plugin shutdown failed.", error);
+				pluginLog("error", "OpenTelemetry runtime plugin shutdown failed.", error);
 			}
 		};
 
@@ -2192,7 +2299,7 @@ module.exports = (RED: RuntimeApi) => {
 		};
 		registerRuntimePluginOnce("opentelemetry-runtime", runtimePlugin);
 	} else {
-		consoleLog(
+		pluginLog(
 			"warn",
 			"Node-RED runtime plugin API is unavailable; OpenTelemetry runtime plugin was not registered.",
 		);
@@ -2220,6 +2327,7 @@ module.exports.__test__ = {
 	maskUrlCredentials,
 	formatStartupConfigSummary,
 	logEvent,
+	pluginLog,
 	getMsgSpans: () => msgSpans,
 	clearInterval: () => {
 		if (sharedState.intervalId) {

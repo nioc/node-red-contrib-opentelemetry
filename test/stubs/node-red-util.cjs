@@ -17,6 +17,7 @@ module.exports = {
 		removeHandler: (handler) => {
 			handlers.delete(handler);
 		},
+		log: () => {},
 		emit: (entry) => {
 			for (const handler of handlers) {
 				if (handler && typeof handler.emit === "function") {
