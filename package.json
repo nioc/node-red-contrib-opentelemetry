@@ -6,7 +6,7 @@
 		"lint": "biome lint .",
 		"format": "biome format --write .",
 		"format:check": "biome format .",
-		"build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc && node scripts/copy-node-red-assets.mjs",
+		"build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
 		"build:test": "node -e \"require('node:fs').rmSync('dist-tests',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node -e \"require('node:fs').copyFileSync('package.json','dist-tests/package.json')\"",
 		"prepublishOnly": "npm run build",
 		"pack:check": "npm run build && npm pack --dry-run",
@@ -48,11 +48,8 @@
 	},
 	"node-red": {
 		"version": ">=4.0.0",
-		"nodes": {
-			"opentelemetry": "dist/nodes/opentelemetry.js"
-		},
 		"plugins": {
-			"opentelemetry-runtime": "dist/nodes/opentelemetry.js"
+			"opentelemetry-runtime": "dist/plugins/opentelemetry-runtime.js"
 		}
 	},
 	"devDependencies": {

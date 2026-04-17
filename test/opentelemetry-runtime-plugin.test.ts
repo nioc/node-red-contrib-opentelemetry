@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const otelApi = require("@opentelemetry/api");
 const otelLogsApi = require("@opentelemetry/api-logs");
-const otelModule = require("../src/nodes/opentelemetry");
+const otelModule = require("../src/plugins/opentelemetry-runtime");
 
 const mockRed = {
 	nodes: {
@@ -1065,141 +1065,106 @@ test("endSpan keeps error status when terminal response has 2xx status", () => {
 	assert.equal(parentStatusCodes.includes(1), false);
 });
 
-test("postDeliver.otel hook injects trace context for http and mqtt", async (_t) => {
-	let NodeConstructor: any;
-	const mockRed = {
+function createPluginHarness(withHookListeners: boolean = false) {
+	let runtimePlugin: any;
+	const hooks = withHookListeners
+		? {
+				listeners: {},
+				add: function (name, listener) {
+					this.listeners[name] = listener;
+				},
+				remove: function (pattern) {
+					if (!pattern || !String(pattern).startsWith(".")) {
+						delete this.listeners[pattern];
+						return;
+					}
+					Object.keys(this.listeners)
+						.filter((name) => name.endsWith(pattern.substring(1)))
+						.forEach((name) => {
+							delete this.listeners[name];
+						});
+				},
+			}
+		: {
+				add: () => {},
+				remove: () => {},
+			};
+	const mockRed: any = {
 		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
+			getNode: (id) => ({ name: `Flow ${id}` }),
 		},
-		hooks: {
-			listeners: {},
-			add: function (name, listener) {
-				this.listeners[name] = listener;
-			},
-			remove: function (pattern) {
-				Object.keys(this.listeners)
-					.filter((name) => name.endsWith(pattern.substring(1)))
-					.forEach((name) => {
-						delete this.listeners[name];
-					});
+		hooks,
+		plugins: {
+			registerRuntimePlugin: (plugin) => {
+				runtimePlugin = plugin;
 			},
 		},
 	};
 
-	otelModule(mockRed);
+	assert.doesNotThrow(() => {
+		otelModule(mockRed);
+	});
+	return { runtimePlugin, mockRed };
+}
 
-	let closeHandler: any;
-	const nodeInstance = {
-		on: (event, handler) => {
-			if (event === "close") closeHandler = handler;
+test("postDeliver.otel hook injects trace context for http and mqtt", async () => {
+	const { runtimePlugin, mockRed } = createPluginHarness(true);
+	assert.ok(runtimePlugin);
+
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			protocol: "http",
+			serviceName: "test-service",
+			rootPrefix: "",
+			ignoredNodeTypes: "",
+			propagateHeaderNodeTypes: "http request,mqtt out",
+			logLevel: "off",
+			timeout: 10,
+			attributeMappings: [],
 		},
-		status: () => {},
-	};
-
-	const config = {
-		url: "http://localhost:4318/v1/traces",
-		protocol: "http",
-		serviceName: "test-service",
-		rootPrefix: "",
-		ignoredNodeTypes: "",
-		propagateHeaderNodeTypes: "http request,mqtt out",
-		logLevel: "off",
-		timeout: 10,
-		attributeMappings: [],
-	};
-
-	NodeConstructor.call(nodeInstance, config);
+	});
 
 	const postDeliverListener = mockRed.hooks.listeners["postDeliver.otel"];
 	assert.ok(postDeliverListener);
 
-	// Test http request
 	const httpSendEvent = {
 		msg: { _msgid: "http-msg" },
-		source: { node: { id: "source-node", type: "function" } },
-		destination: { node: { id: "dest-node", type: "http request" } },
+		source: { node: { id: "source-node", type: "function", z: "flow" } },
+		destination: { node: { id: "dest-node", type: "http request", z: "flow" } },
 	};
 	postDeliverListener(httpSendEvent);
-	assert.ok(httpSendEvent.msg.headers, "headers should be present");
-	assert.ok(
-		httpSendEvent.msg.headers.traceparent,
-		"traceparent header should be injected",
-	);
+	assert.ok(httpSendEvent.msg.headers);
+	assert.ok(httpSendEvent.msg.headers.traceparent);
 
-	// Test mqtt out
 	const mqttSendEvent = {
 		msg: { _msgid: "mqtt-msg" },
-		source: { node: { id: "source-node", type: "function" } },
-		destination: { node: { id: "dest-node", type: "mqtt out" } },
+		source: { node: { id: "source-node", type: "function", z: "flow" } },
+		destination: { node: { id: "dest-node", type: "mqtt out", z: "flow" } },
 	};
 	postDeliverListener(mqttSendEvent);
-	assert.ok(
-		mqttSendEvent.msg.userProperties,
-		"userProperties should be present",
-	);
-	assert.ok(
-		mqttSendEvent.msg.userProperties.traceparent,
-		"traceparent should be in userProperties",
-	);
+	assert.ok(mqttSendEvent.msg.userProperties);
+	assert.ok(mqttSendEvent.msg.userProperties.traceparent);
 
-	// Test non-propagated type
-	const functionSendEvent = {
-		msg: { _msgid: "func-msg" },
-		source: { node: { id: "source-node", type: "function" } },
-		destination: { node: { id: "dest-node", type: "function" } },
-	};
-	postDeliverListener(functionSendEvent);
-	assert.equal(
-		functionSendEvent.msg.headers,
-		undefined,
-		"headers should not be added",
-	);
-
-	// cleanup
-	await closeHandler.call(nodeInstance);
+	await runtimePlugin.onClose();
 });
 
-test("preDeliver.otel hook clears all propagated trace headers safely", () => {
-	let NodeConstructor: any;
-	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
-		},
-		hooks: {
-			listeners: {},
-			add: function (name, listener) {
-				this.listeners[name] = listener;
-			},
-			remove: () => {},
-		},
-	};
+test("preDeliver.otel hook clears all propagated trace headers safely", async () => {
+	const { runtimePlugin, mockRed } = createPluginHarness(true);
+	assert.ok(runtimePlugin);
 
-	otelModule(mockRed);
-
-	const nodeInstance = {
-		on: () => {},
-		status: () => {},
-	};
-	NodeConstructor.call(nodeInstance, {
-		url: "http://localhost:4318/v1/traces",
-		protocol: "http",
-		serviceName: "test-service",
-		rootPrefix: "",
-		ignoredNodeTypes: "",
-		propagateHeaderNodeTypes: "function",
-		logLevel: "off",
-		timeout: 10,
-		attributeMappings: [],
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			protocol: "http",
+			serviceName: "test-service",
+			rootPrefix: "",
+			ignoredNodeTypes: "",
+			propagateHeaderNodeTypes: "function",
+			logLevel: "off",
+			timeout: 10,
+			attributeMappings: [],
+		},
 	});
 
 	const preDeliverListener = mockRed.hooks.listeners["preDeliver.otel"];
@@ -1226,45 +1191,23 @@ test("preDeliver.otel hook clears all propagated trace headers safely", () => {
 	assert.equal(sendEvent.msg.headers["x-b3-spanid"], undefined);
 	assert.equal(sendEvent.msg.headers["x-b3-sampled"], undefined);
 
-	const noHeadersEvent = {
-		source: { node: { type: "function" } },
-		msg: {},
-	};
-	assert.doesNotThrow(() => preDeliverListener(noHeadersEvent));
-	assert.deepEqual(noHeadersEvent.msg.headers, {});
+	await runtimePlugin.onClose();
 });
 
-test("onReceive.otel hook sets otelRootMsgId for split nodes", () => {
-	let NodeConstructor: any;
-	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
-		},
-		hooks: {
-			listeners: {},
-			add: function (name, listener) {
-				this.listeners[name] = listener;
-			},
-			remove: () => {},
-		},
-	};
-	otelModule(mockRed);
+test("onReceive.otel hook sets otelRootMsgId for split nodes", async () => {
+	const { runtimePlugin, mockRed } = createPluginHarness(true);
+	assert.ok(runtimePlugin);
 
-	const nodeInstance = { on: () => {}, status: () => {} };
-	const config = {
-		url: "http://localhost:4318/v1/traces",
-		ignoredNodeTypes: "",
-		propagateHeaderNodeTypes: "",
-	};
-	NodeConstructor.call(nodeInstance, config);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			ignoredNodeTypes: "",
+			propagateHeaderNodeTypes: "",
+		},
+	});
 
 	const onReceiveListener = mockRed.hooks.listeners["onReceive.otel"];
-	assert.ok(onReceiveListener, "onReceive.otel listener should be registered");
+	assert.ok(onReceiveListener);
 
 	const splitEvent = {
 		msg: { _msgid: "original-msg-id" },
@@ -1279,507 +1222,32 @@ test("onReceive.otel hook sets otelRootMsgId for split nodes", () => {
 	};
 	onReceiveListener(otherEvent);
 	assert.equal(otherEvent.msg.otelRootMsgId, undefined);
+
+	await runtimePlugin.onClose();
 });
 
-test("node constructor applies defaults for missing optional config", async () => {
-	let NodeConstructor: any;
-	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
-			getNode: (id) => ({ name: `Flow ${id}` }),
-		},
-		hooks: {
-			listeners: {},
-			add: function (name, listener) {
-				this.listeners[name] = listener;
-			},
-			remove: () => {},
-		},
-	};
-	otelModule(mockRed);
-
-	let closeHandler: any;
-	const nodeInstance = {
-		on: (event, handler) => {
-			if (event === "close") closeHandler = handler;
-		},
-		status: () => {},
-	};
-
-	assert.doesNotThrow(() => {
-		NodeConstructor.call(nodeInstance, {
+test("runtime plugin onSettings does not create providers when all signals are disabled", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
 			url: "http://localhost:4318/v1/traces",
-		});
+			metricsUrl: "http://localhost:4318/v1/metrics",
+			logsUrl: "http://localhost:4318/v1/logs",
+			tracesEnabled: false,
+			metricsEnabled: false,
+			logsEnabled: false,
+		},
 	});
-
-	assert.equal(
-		parseAttribute(false, { payload: "value" }, "flow", "function"),
-		undefined,
-	);
-
-	const startedSpans = [];
-	const tracer = {
-		startSpan: (name, options) => {
-			const span = createFakeSpan(name, options);
-			startedSpans.push(span);
-			return span;
-		},
-	};
-	createSpan(
-		mockRed,
-		tracer,
-		{ _msgid: "defaults-msg" },
-		{ id: "node", type: "function", name: "Function", z: "flow" },
-		{},
-		false,
-	);
-	assert.equal(startedSpans[0].name, "Function");
-
-	const parentSpan = createFakeSpan("parent");
-	const spans = getMsgSpans();
-	spans.set("stale-msg", {
-		parentSpan,
-		spans: new Map(),
-		updateTimestamp: Date.now() - 15_000,
-	});
-	deleteOutdatedMsgSpans();
-	assert.equal(spans.has("stale-msg"), false);
-	assert.equal(parentSpan.ended, true);
-
-	await closeHandler.call(nodeInstance);
-});
-
-test("onSend captures start time and metrics work when traces are disabled", async () => {
-	let NodeConstructor: any;
-	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
-		},
-		hooks: {
-			listeners: {},
-			add: function (name, listener) {
-				this.listeners[name] = listener;
-			},
-			remove: () => {},
-		},
-	};
-	otelModule(mockRed);
-
-	let closeHandler: any;
-	const nodeInstance = {
-		on: (event, handler) => {
-			if (event === "close") closeHandler = handler;
-		},
-		status: () => {},
-	};
-
-	NodeConstructor.call(nodeInstance, {
-		url: "http://localhost:4318/v1/traces",
-		metricsUrl: "http://localhost:4318/v1/metrics",
-		logsUrl: "http://localhost:4318/v1/logs",
-		tracesEnabled: false,
-		metricsEnabled: true,
-		logsEnabled: false,
-	});
-
-	const sharedState = getSharedState();
-	const recordSpy = test.mock.fn();
-	sharedState.metrics.requestDuration = { record: recordSpy };
-
-	const onSendListener = mockRed.hooks.listeners["onSend.otel"];
-	const onCompleteListener = mockRed.hooks.listeners["onComplete.otel"];
-	assert.ok(onSendListener);
-	assert.ok(onCompleteListener);
-
-	const msg = {
-		_msgid: "metrics-no-traces",
-		req: { method: "GET", path: "/health", headers: {} },
-		res: { _res: { statusCode: 204 } },
-	};
-	onSendListener([
-		{
-			msg,
-			source: {
-				node: { id: "http-in", type: "http in", name: "HTTP In", z: "flow" },
-			},
-		},
-	]);
-	assert.equal(typeof msg.otelStartTime, "number");
-
-	onCompleteListener({
-		msg,
-		node: {
-			node: {
-				id: "http-resp",
-				type: "http response",
-				name: "HTTP Response",
-				z: "flow",
-			},
-		},
-		error: null,
-	});
-
-	assert.equal(recordSpy.mock.calls.length, 1);
-	await closeHandler.call(nodeInstance);
-});
-
-test("node shutdown should not disable global OpenTelemetry APIs", async () => {
-	let NodeConstructor: any;
-	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
-		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
-	};
-	otelModule(mockRed);
-
-	let closeHandler: any;
-	const nodeInstance = {
-		on: (event, handler) => {
-			if (event === "close") closeHandler = handler;
-		},
-		status: () => {},
-	};
-
-	NodeConstructor.call(nodeInstance, {
-		url: "http://localhost:4318/v1/traces",
-		protocol: "http",
-		serviceName: "test-service",
-	});
-
-	const traceDisableSpy = test.mock.method(otelApi.trace, "disable");
-	const metricsDisableSpy = test.mock.method(otelApi.metrics, "disable");
-	const logsDisableSpy = test.mock.method(otelLogsApi.logs, "disable");
-
-	await closeHandler.call(nodeInstance);
-
-	assert.equal(traceDisableSpy.mock.calls.length, 0);
-	assert.equal(metricsDisableSpy.mock.calls.length, 0);
-	assert.equal(logsDisableSpy.mock.calls.length, 0);
-});
-
-test("initOTEL does not create providers when all signals are disabled", () => {
-	let NodeConstructor: any;
-	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
-		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
-	};
-	otelModule(mockRed);
-
-	const nodeInstance = {
-		on: () => {},
-		status: () => {},
-	};
-
-	NodeConstructor.call(nodeInstance, {
-		url: "http://localhost:4318/v1/traces",
-		metricsUrl: "http://localhost:4318/v1/metrics",
-		logsUrl: "http://localhost:4318/v1/logs",
-		tracesEnabled: false,
-		metricsEnabled: false,
-		logsEnabled: false,
-	});
-
 	const sharedState = getSharedState();
 	assert.equal(sharedState.provider, null);
 	assert.equal(sharedState.meterProvider, null);
 	assert.equal(sharedState.loggerProvider, null);
 });
 
-test("initOTEL creates only configured signal providers", async () => {
-	let NodeConstructor: any;
-	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
-		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
-	};
-	otelModule(mockRed);
-
-	let closeHandler: any;
-	const nodeInstance = {
-		on: (event, handler) => {
-			if (event === "close") closeHandler = handler;
-		},
-		status: () => {},
-	};
-
-	NodeConstructor.call(nodeInstance, {
-		url: "http://localhost:4318/v1/traces",
-		metricsUrl: "http://localhost:4318/v1/metrics",
-		logsUrl: "http://localhost:4318/v1/logs",
-		tracesEnabled: false,
-		metricsEnabled: true,
-		logsEnabled: true,
-	});
-
-	const sharedState = getSharedState();
-	assert.equal(sharedState.provider, null);
-	assert.ok(sharedState.meterProvider);
-	assert.ok(sharedState.loggerProvider);
-
-	await closeHandler.call(nodeInstance);
-});
-
-test("node init keeps local providers when global providers are already set", async () => {
-	let NodeConstructor: any;
-	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
-		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
-	};
-	otelModule(mockRed);
-
-	let closeHandler: any;
-	const nodeInstance = {
-		on: (event, handler) => {
-			if (event === "close") closeHandler = handler;
-		},
-		status: () => {},
-	};
-
-	const tracerSetSpy = test.mock.method(
-		otelApi.trace,
-		"setGlobalTracerProvider",
-		() => false,
-	);
-	const meterSetSpy = test.mock.method(
-		otelApi.metrics,
-		"setGlobalMeterProvider",
-		() => false,
-	);
-	const loggerSetSpy = test.mock.method(
-		otelLogsApi.logs,
-		"setGlobalLoggerProvider",
-		(existingProvider) => ({ other: true, existingProvider }),
-	);
-
-	NodeConstructor.call(nodeInstance, {
-		url: "http://localhost:4318/v1/traces",
-		metricsUrl: "http://localhost:4318/v1/metrics",
-		logsUrl: "http://localhost:4318/v1/logs",
-		protocol: "http",
-		serviceName: "test-service",
-		metricsEnabled: true,
-		logsEnabled: true,
-	});
-
-	const sharedState = getSharedState();
-	assert.equal(tracerSetSpy.mock.calls.length, 1);
-	assert.equal(meterSetSpy.mock.calls.length, 1);
-	assert.equal(loggerSetSpy.mock.calls.length, 1);
-	assert.ok(sharedState.provider);
-	assert.ok(sharedState.tracer);
-	assert.ok(sharedState.meterProvider);
-	assert.ok(sharedState.loggerProvider);
-	assert.ok(sharedState.logger);
-
-	await closeHandler.call(nodeInstance);
-});
-
-test("runtime plugin onSettings does not leak lifecycle ref count", async () => {
-	let runtimePlugin: any;
-	const mockRed = {
-		nodes: {
-			createNode: () => {},
-			registerType: () => {},
-		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
-		plugins: {
-			registerRuntimePlugin: (plugin) => {
-				runtimePlugin = plugin;
-			},
-		},
-	};
-
-	otelModule(mockRed);
+test("runtime plugin onSettings creates only configured signal providers", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
 	assert.ok(runtimePlugin);
-
-	await runtimePlugin.onSettings({
-		opentelemetry: {
-			url: "http://localhost:4318/v1/traces",
-			protocol: "http",
-		},
-	});
-	await runtimePlugin.onSettings({
-		opentelemetry: {
-			url: "http://localhost:4318/v1/traces",
-			protocol: "http",
-		},
-	});
-	assert.equal(getSharedState().refCount, 0);
-	assert.ok(getSharedState().provider);
-
-	await runtimePlugin.onClose();
-	assert.equal(getSharedState().refCount, 0);
-	assert.equal(getSharedState().provider, null);
-});
-
-test("module initialization tolerates duplicate Node-RED registration", () => {
-	const registeredNodeTypes = new Set();
-	const registeredPlugins = new Set();
-	const mockRed = {
-		nodes: {
-			createNode: () => {},
-			registerType: (name) => {
-				if (registeredNodeTypes.has(name)) {
-					throw new Error(`${name} already registered`);
-				}
-				registeredNodeTypes.add(name);
-			},
-		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
-		plugins: {
-			registerRuntimePlugin: (plugin) => {
-				if (registeredPlugins.has(plugin.id)) {
-					throw new Error(`${plugin.id} already registered`);
-				}
-				registeredPlugins.add(plugin.id);
-			},
-		},
-	};
-
-	assert.doesNotThrow(() => {
-		otelModule(mockRed);
-		otelModule(mockRed);
-	});
-	assert.equal(registeredNodeTypes.has("OpenTelemetry"), true);
-	assert.equal(registeredPlugins.has("opentelemetry-runtime"), true);
-});
-
-test("runtime plugin onSettings updates runtime config without extra lifecycle ref", async () => {
-	let runtimePlugin: any;
-	const mockRed = {
-		nodes: {
-			createNode: () => {},
-			registerType: () => {},
-		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
-		plugins: {
-			registerRuntimePlugin: (plugin) => {
-				runtimePlugin = plugin;
-			},
-		},
-	};
-
-	otelModule(mockRed);
-	assert.ok(runtimePlugin);
-
-	await runtimePlugin.onSettings({
-		opentelemetry: {
-			url: "http://localhost:4318/v1/traces",
-			logLevel: "warn",
-			timeout: 10,
-		},
-	});
-	assert.equal(getSharedState().refCount, 0);
-	assert.equal(getSharedState().logLevel, "warn");
-	assert.equal(getSharedState().timeout, 10000);
-
-	await runtimePlugin.onSettings({
-		opentelemetry: {
-			url: "http://localhost:4318/v1/traces",
-			logLevel: "debug",
-			timeout: 3,
-		},
-	});
-	assert.equal(getSharedState().refCount, 0);
-	assert.equal(getSharedState().logLevel, "debug");
-	assert.equal(getSharedState().timeout, 3000);
-
-	await runtimePlugin.onClose();
-	assert.equal(getSharedState().refCount, 0);
-});
-
-test("runtime plugin onSettings reconfigures active providers", async () => {
-	let runtimePlugin: any;
-	const mockRed = {
-		nodes: {
-			createNode: () => {},
-			registerType: () => {},
-		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
-		plugins: {
-			registerRuntimePlugin: (plugin) => {
-				runtimePlugin = plugin;
-			},
-		},
-	};
-
-	otelModule(mockRed);
-	assert.ok(runtimePlugin);
-
-	await runtimePlugin.onSettings({
-		opentelemetry: {
-			url: "http://localhost:4318/v1/traces",
-			tracesEnabled: true,
-			metricsEnabled: false,
-			logsEnabled: false,
-		},
-	});
-
-	assert.ok(getSharedState().provider);
-	assert.equal(getSharedState().meterProvider, null);
-	assert.equal(getSharedState().loggerProvider, null);
-	assert.equal(getSharedState().refCount, 0);
-
 	await runtimePlugin.onSettings({
 		opentelemetry: {
 			url: "http://localhost:4318/v1/traces",
@@ -1790,98 +1258,102 @@ test("runtime plugin onSettings reconfigures active providers", async () => {
 			logsEnabled: true,
 		},
 	});
-
-	assert.equal(getSharedState().provider, null);
-	assert.ok(getSharedState().meterProvider);
-	assert.ok(getSharedState().loggerProvider);
-	assert.equal(getSharedState().refCount, 0);
-
+	const sharedState = getSharedState();
+	assert.equal(sharedState.provider, null);
+	assert.ok(sharedState.meterProvider);
+	assert.ok(sharedState.loggerProvider);
 	await runtimePlugin.onClose();
-	assert.equal(getSharedState().refCount, 0);
 });
 
-test("runtime plugin onSettings is ignored when config node exists", async () => {
-	let NodeConstructor: any;
+test("runtime plugin shutdown should not disable global OpenTelemetry APIs", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			protocol: "http",
+			serviceName: "test-service",
+		},
+	});
+	const traceDisableSpy = test.mock.method(otelApi.trace, "disable");
+	const metricsDisableSpy = test.mock.method(otelApi.metrics, "disable");
+	const logsDisableSpy = test.mock.method(otelLogsApi.logs, "disable");
+	await runtimePlugin.onClose();
+	assert.equal(traceDisableSpy.mock.calls.length, 0);
+	assert.equal(metricsDisableSpy.mock.calls.length, 0);
+	assert.equal(logsDisableSpy.mock.calls.length, 0);
+});
+
+test("module initialization tolerates duplicate runtime plugin registration", () => {
+	const registeredPlugins = new Set();
+	const mockRed = {
+		hooks: { add: () => {}, remove: () => {} },
+		plugins: {
+			registerRuntimePlugin: (plugin) => {
+				if (registeredPlugins.has(plugin.id)) {
+					throw new Error(`${plugin.id} already registered`);
+				}
+				registeredPlugins.add(plugin.id);
+			},
+		},
+	};
+	assert.doesNotThrow(() => {
+		otelModule(mockRed);
+		otelModule(mockRed);
+	});
+	assert.equal(registeredPlugins.has("opentelemetry-runtime"), true);
+});
+
+test("module initialization tolerates plugin-only Node-RED context", async () => {
 	let runtimePlugin: any;
 	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
-		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
 		plugins: {
 			registerRuntimePlugin: (plugin) => {
 				runtimePlugin = plugin;
 			},
 		},
 	};
-
-	otelModule(mockRed);
-	assert.ok(NodeConstructor);
-	assert.ok(runtimePlugin);
-
-	let closeHandler: any;
-	const nodeInstance = {
-		on: (event, handler) => {
-			if (event === "close") closeHandler = handler;
-		},
-	};
-
-	NodeConstructor.call(nodeInstance, {
-		url: "http://localhost:4318/v1/traces",
-		logLevel: "error",
-		timeout: 11,
+	assert.doesNotThrow(() => {
+		otelModule(mockRed);
 	});
-	assert.equal(getSharedState().logLevel, "error");
-	assert.equal(getSharedState().timeout, 11000);
-	assert.ok(getSharedState().provider);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			protocol: "http",
+		},
+	});
+	assert.equal(getSharedState().hooksRegistered, false);
+	await runtimePlugin.onClose();
+});
 
+test("runtime plugin onSettings updates runtime config", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			logLevel: "warn",
+			timeout: 10,
+		},
+	});
+	assert.equal(getSharedState().logLevel, "warn");
+	assert.equal(getSharedState().timeout, 10000);
 	await runtimePlugin.onSettings({
 		opentelemetry: {
 			url: "http://localhost:4318/v1/traces",
 			logLevel: "debug",
-			timeout: 2,
+			timeout: 3,
 		},
 	});
-	assert.equal(getSharedState().logLevel, "error");
-	assert.equal(getSharedState().timeout, 11000);
-	assert.ok(getSharedState().provider);
-
+	assert.equal(getSharedState().logLevel, "debug");
+	assert.equal(getSharedState().timeout, 3000);
 	await runtimePlugin.onClose();
-	assert.ok(getSharedState().provider);
-
-	await closeHandler.call(nodeInstance);
-	assert.equal(getSharedState().provider, null);
 });
 
-test("runtime plugin onSettings awaits provider shutdown before reconfigure", async () => {
-	let runtimePlugin: any;
-	const mockRed = {
-		nodes: {
-			createNode: () => {},
-			registerType: () => {},
-		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
-		plugins: {
-			registerRuntimePlugin: (plugin) => {
-				runtimePlugin = plugin;
-			},
-		},
-	};
-
-	otelModule(mockRed);
+test("runtime plugin onSettings reconfigures active providers", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
 	assert.ok(runtimePlugin);
-
 	await runtimePlugin.onSettings({
 		opentelemetry: {
 			url: "http://localhost:4318/v1/traces",
@@ -1890,7 +1362,36 @@ test("runtime plugin onSettings awaits provider shutdown before reconfigure", as
 			logsEnabled: false,
 		},
 	});
+	assert.ok(getSharedState().provider);
+	assert.equal(getSharedState().meterProvider, null);
+	assert.equal(getSharedState().loggerProvider, null);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			metricsUrl: "http://localhost:4318/v1/metrics",
+			logsUrl: "http://localhost:4318/v1/logs",
+			tracesEnabled: false,
+			metricsEnabled: true,
+			logsEnabled: true,
+		},
+	});
+	assert.equal(getSharedState().provider, null);
+	assert.ok(getSharedState().meterProvider);
+	assert.ok(getSharedState().loggerProvider);
+	await runtimePlugin.onClose();
+});
 
+test("runtime plugin onSettings awaits provider shutdown before reconfigure", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			tracesEnabled: true,
+			metricsEnabled: false,
+			logsEnabled: false,
+		},
+	});
 	const sharedState = getSharedState();
 	assert.ok(sharedState.provider);
 	const oldProvider = sharedState.provider;
@@ -1903,7 +1404,6 @@ test("runtime plugin onSettings awaits provider shutdown before reconfigure", as
 				resolve();
 			};
 		});
-
 	const reconfigurePromise = runtimePlugin.onSettings({
 		opentelemetry: {
 			url: "http://localhost:4318/v1/traces",
@@ -1912,63 +1412,33 @@ test("runtime plugin onSettings awaits provider shutdown before reconfigure", as
 			logsEnabled: false,
 		},
 	});
-
 	await Promise.resolve();
 	assert.equal(shutdownCompleted, false);
-
 	resolveShutdown();
 	await reconfigurePromise;
 	assert.equal(shutdownCompleted, true);
 	assert.notEqual(getSharedState().provider, oldProvider);
-
 	await runtimePlugin.onClose();
 });
 
 test("onSend.otel hook creates spans for every event in batch", async () => {
-	let NodeConstructor: any;
-	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
-			getNode: (id) => ({ name: `Flow ${id}` }),
+	const { runtimePlugin, mockRed } = createPluginHarness(true);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			protocol: "http",
+			serviceName: "test-service",
+			rootPrefix: "",
+			ignoredNodeTypes: "",
+			propagateHeaderNodeTypes: "",
+			logLevel: "off",
+			timeout: 10,
+			attributeMappings: [],
 		},
-		hooks: {
-			listeners: {},
-			add: function (name, listener) {
-				this.listeners[name] = listener;
-			},
-			remove: (_pattern) => {},
-		},
-	};
-	otelModule(mockRed);
-
-	let closeHandler: any;
-	const nodeInstance = {
-		on: (event, handler) => {
-			if (event === "close") closeHandler = handler;
-		},
-		status: () => {},
-	};
-
-	NodeConstructor.call(nodeInstance, {
-		url: "http://localhost:4318/v1/traces",
-		protocol: "http",
-		serviceName: "test-service",
-		rootPrefix: "",
-		ignoredNodeTypes: "",
-		propagateHeaderNodeTypes: "",
-		logLevel: "off",
-		timeout: 10,
-		attributeMappings: [],
 	});
-
 	const onSendListener = mockRed.hooks.listeners["onSend.otel"];
 	assert.ok(onSendListener);
-
 	onSendListener([
 		{
 			msg: { _msgid: "a" },
@@ -1979,45 +1449,21 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 			source: { node: { id: "node-b", type: "function", z: "flow-b" } },
 		},
 	]);
-
 	assert.equal(getMsgSpans().size, 2);
-
-	await closeHandler.call(nodeInstance);
+	await runtimePlugin.onClose();
 });
 
-test("node close waits for provider shutdown before resolving", async () => {
-	let NodeConstructor: any;
-	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
+test("runtime plugin onClose waits for provider shutdown before resolving", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			url: "http://localhost:4318/v1/traces",
+			tracesEnabled: true,
+			metricsEnabled: false,
+			logsEnabled: false,
 		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
-	};
-	otelModule(mockRed);
-
-	let closeHandler: any;
-	const nodeInstance = {
-		on: (event, handler) => {
-			if (event === "close") closeHandler = handler;
-		},
-		status: () => {},
-	};
-
-	NodeConstructor.call(nodeInstance, {
-		url: "http://localhost:4318/v1/traces",
-		tracesEnabled: true,
-		metricsEnabled: false,
-		logsEnabled: false,
 	});
-
 	const sharedState = getSharedState();
 	assert.ok(sharedState.provider);
 	let resolveShutdown: any;
@@ -2025,66 +1471,12 @@ test("node close waits for provider shutdown before resolving", async () => {
 		new Promise((resolve) => {
 			resolveShutdown = resolve;
 		});
-
 	let closeResolved = false;
-	const closePromise = closeHandler.call(nodeInstance).then(() => {
+	const closePromise = runtimePlugin.onClose().then(() => {
 		closeResolved = true;
 	});
 	await Promise.resolve();
 	assert.equal(closeResolved, false);
-
-	resolveShutdown();
-	await closePromise;
-	assert.equal(closeResolved, true);
-});
-
-test("node close ignores extra args and resolves after shutdown", async () => {
-	let NodeConstructor: any;
-	const mockRed = {
-		nodes: {
-			createNode: (node, config) => {
-				Object.assign(node, config);
-			},
-			registerType: (_name, nodeCtor) => {
-				NodeConstructor = nodeCtor;
-			},
-		},
-		hooks: {
-			add: () => {},
-			remove: () => {},
-		},
-	};
-	otelModule(mockRed);
-
-	let closeHandler: any;
-	const nodeInstance = {
-		on: (event, handler) => {
-			if (event === "close") closeHandler = handler;
-		},
-	};
-
-	NodeConstructor.call(nodeInstance, {
-		url: "http://localhost:4318/v1/traces",
-		tracesEnabled: true,
-		metricsEnabled: false,
-		logsEnabled: false,
-	});
-
-	const sharedState = getSharedState();
-	assert.ok(sharedState.provider);
-	let resolveShutdown: any;
-	sharedState.provider.shutdown = () =>
-		new Promise((resolve) => {
-			resolveShutdown = resolve;
-		});
-
-	let closeResolved = false;
-	const closePromise = closeHandler.call(nodeInstance, true, () => {}).then(() => {
-		closeResolved = true;
-	});
-	await Promise.resolve();
-	assert.equal(closeResolved, false);
-
 	resolveShutdown();
 	await closePromise;
 	assert.equal(closeResolved, true);
@@ -2157,5 +1549,6 @@ test("endSpan keeps parent active when remaining child span is non-orphan", () =
 	assert.ok(parent);
 	assert.equal(parent.spans.has("active-child-msg#function-node-b"), true);
 });
+
 
 

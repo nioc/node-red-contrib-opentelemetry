@@ -3,7 +3,6 @@ import type {
 	NodeAPI,
 	NodeDef,
 	NodeMessageInFlow,
-	Node as RedNodeInstance,
 } from "@node-red/registry";
 import {
 	type Context,
@@ -163,7 +162,6 @@ interface OTelSpanExtension {
 	name?: string;
 }
 
-type OTELNodeDef = NodeDef & OTELConfig;
 type RuntimeNodeDef = NodeDef & {
 	url?: string;
 	method?: string;
@@ -200,6 +198,10 @@ type RuntimeHookEvent = {
 	node?: { node: RuntimeNodeDef };
 	error?: unknown;
 };
+type RuntimeRedNodeInstance = {
+	id?: string;
+	name?: string;
+};
 type RuntimePluginRegistration = {
 	id: string;
 	onSettings?: (settings: unknown) => void;
@@ -231,7 +233,6 @@ interface SharedState {
 		requestDuration: Histogram | null;
 	};
 	intervalId: NodeJS.Timeout | null;
-	refCount: number;
 	hooksRegistered: boolean;
 }
 
@@ -252,7 +253,6 @@ const sharedState: SharedState = {
 		requestDuration: null,
 	},
 	intervalId: null,
-	refCount: 0,
 	hooksRegistered: false,
 };
 
@@ -774,7 +774,7 @@ function getSpanId(
  */
 function getFlowName(RED: RuntimeApi, flowId: string): string | undefined {
 	if (!RED || !flowId) return undefined;
-	const flow = RED.nodes.getNode(flowId) as RedNodeInstance | undefined;
+	const flow = RED.nodes.getNode(flowId) as RuntimeRedNodeInstance | undefined;
 	return flow?.name;
 }
 
@@ -1072,7 +1072,7 @@ function createSpan(
 	tracer: Tracer,
 	msg: RuntimeMessage,
 	nodeDefinition: RuntimeNodeDef,
-	_node: RedNodeInstance | null,
+	_node: RuntimeRedNodeInstance | null,
 	isNotTraced: boolean,
 ): Span | undefined {
 	try {
@@ -1585,6 +1585,17 @@ function initializeLoggerProvider(
 }
 
 function registerRuntimeHooks(RED: RuntimeApi): void {
+	if (
+		!RED.hooks ||
+		typeof RED.hooks.add !== "function" ||
+		typeof RED.hooks.remove !== "function"
+	) {
+		consoleLog(
+			"warn",
+			"Node-RED hooks API is unavailable; runtime hooks were not registered.",
+		);
+		return;
+	}
 	RED.hooks.add("onSend.otel", (events: RuntimeHookEvent[]) => {
 		if (events.length === 0) {
 			return;
@@ -1734,25 +1745,6 @@ async function shutdownSignalProviders(): Promise<void> {
  */
 module.exports = (RED: RuntimeApi) => {
 	let runtimePluginInitialized = false;
-	let activeConfigNodes = 0;
-	function registerNodeTypeOnce(): void {
-		try {
-			RED.nodes.registerType("OpenTelemetry", OpenTelemetryNode);
-		} catch (error) {
-			if (!isAlreadyRegisteredError(error)) {
-				consoleLog(
-					"error",
-					"Failed to register Node-RED config node type 'OpenTelemetry'.",
-					error,
-				);
-				throw error;
-			}
-			consoleLog(
-				"debug",
-				"Node-RED config node type 'OpenTelemetry' already registered; skipping duplicate registration.",
-			);
-		}
-	}
 
 	function registerRuntimePluginOnce(plugin: RuntimePluginRegistration): void {
 		try {
@@ -1773,14 +1765,10 @@ module.exports = (RED: RuntimeApi) => {
 		}
 	}
 	/**
-	 * Initialize the OpenTelemetry system. Can be called by the Plugin API or a Node instance.
+	 * Initialize the OpenTelemetry system from runtime plugin settings.
 	 * @param {OTELConfig} config Optional configuration to override defaults
 	 */
-	async function initOTEL(
-		config: OTELConfig = {},
-		options: { trackLifecycle?: boolean } = {},
-	): Promise<void> {
-		const trackLifecycle = options.trackLifecycle ?? true;
+	async function initOTEL(config: OTELConfig = {}): Promise<void> {
 		// get config
 		const resolvedConfig = resolveOpenTelemetryConfig(config);
 		const {
@@ -1805,11 +1793,9 @@ module.exports = (RED: RuntimeApi) => {
 			`OpenTelemetry startup endpoints: traces(${tracesProtocol})=${url ? maskUrlCredentials(url) : "disabled"}, metrics(${metricsProtocol})=${metricsUrl ? maskUrlCredentials(metricsUrl) : "disabled"}, logs(${logsProtocol})=${logsUrl ? maskUrlCredentials(logsUrl) : "disabled"}`,
 		);
 		if (
-			!trackLifecycle &&
-			(sharedState.refCount > 0 ||
-				sharedState.provider ||
-				sharedState.meterProvider ||
-				sharedState.loggerProvider)
+			sharedState.provider ||
+			sharedState.meterProvider ||
+			sharedState.loggerProvider
 		) {
 			consoleLog("debug", "OpenTelemetry startup: replacing existing providers");
 			await shutdownSignalProviders();
@@ -1830,73 +1816,44 @@ module.exports = (RED: RuntimeApi) => {
 		initializeLoggerProvider(commonResource, logsEnabled, logsProtocol, logsUrl);
 		if (!sharedState.hooksRegistered) {
 			registerRuntimeHooks(RED);
-			sharedState.hooksRegistered = true;
-			consoleLog("info", "OpenTelemetry startup: runtime hooks registered");
+			if (
+				RED.hooks &&
+				typeof RED.hooks.add === "function" &&
+				typeof RED.hooks.remove === "function"
+			) {
+				sharedState.hooksRegistered = true;
+				consoleLog("info", "OpenTelemetry startup: runtime hooks registered");
+			}
 		}
 
-		if (trackLifecycle) {
-			sharedState.refCount++;
-		}
 	}
 
 	async function stopOTEL(): Promise<void> {
-		if (sharedState.refCount > 0) {
-			sharedState.refCount--;
-		}
-		if (sharedState.refCount > 0) return;
 		if (sharedState.intervalId) {
 			clearInterval(sharedState.intervalId);
 			sharedState.intervalId = null;
 		}
 		if (sharedState.hooksRegistered) {
-			OTEL_HOOK_NAMES.forEach((hookName) => {
-				RED.hooks.remove(hookName);
-			});
+			if (RED.hooks && typeof RED.hooks.remove === "function") {
+				OTEL_HOOK_NAMES.forEach((hookName) => {
+					RED.hooks.remove(hookName);
+				});
+			}
 			sharedState.hooksRegistered = false;
 		}
 		msgSpans.clear();
 		completedHttpMetricsMsgIds.clear();
 		completedHttpResponseMsgIds.clear();
 		await shutdownSignalProviders();
-		sharedState.refCount = 0;
 	}
 
-	// Register as a config Node
-	function OpenTelemetryNode(this: RedNodeInstance, config: OTELNodeDef) {
-		RED.nodes.createNode(this, config);
-		activeConfigNodes++;
-		void initOTEL(config, { trackLifecycle: false }).catch((error) => {
-			consoleLog(
-				"error",
-				"OpenTelemetry config-node initialization failed.",
-				error,
-			);
-		});
-		this.on("close", async () => {
-			try {
-				activeConfigNodes = Math.max(activeConfigNodes - 1, 0);
-				if (activeConfigNodes === 0) {
-					await stopOTEL();
-				}
-			} catch (error) {
-				consoleLog("error", "OpenTelemetry config-node shutdown failed.", error);
-			}
-		});
-	}
-	registerNodeTypeOnce();
-
-	// Support Node-RED 4+ Runtime Plugin
-	// If loaded as a plugin, it won't have a config object, but can read from env vars
+	// Support Node-RED 4+ Runtime Plugin.
 	if (RED.plugins && typeof RED.plugins.registerRuntimePlugin === "function") {
 		registerRuntimePluginOnce({
 			id: "opentelemetry-runtime",
 			onSettings: async (settings: unknown) => {
 				try {
-					if (activeConfigNodes > 0) {
-						return;
-					}
 					let pluginConfig: OTELConfig = {};
-					// We can read from settings.js if needed
 					if (
 						typeof settings === "object" &&
 						settings !== null &&
@@ -1905,7 +1862,7 @@ module.exports = (RED: RuntimeApi) => {
 						const pluginSettings = settings as { opentelemetry?: OTELConfig };
 						pluginConfig = pluginSettings.opentelemetry ?? {};
 					}
-					await initOTEL(pluginConfig, { trackLifecycle: false });
+					await initOTEL(pluginConfig);
 					runtimePluginInitialized = true;
 				} catch (error) {
 					consoleLog("error", "OpenTelemetry runtime plugin settings failed.", error);
@@ -1923,6 +1880,11 @@ module.exports = (RED: RuntimeApi) => {
 				}
 			},
 		});
+	} else {
+		consoleLog(
+			"warn",
+			"Node-RED runtime plugin API is unavailable; OpenTelemetry runtime plugin was not registered.",
+		);
 	}
 };
 
@@ -1962,7 +1924,6 @@ module.exports.__test__ = {
 		sharedState.rootPrefix = "";
 		sharedState.timeout = 10;
 		sharedState.attributeMappings = [];
-		sharedState.refCount = 0;
 		sharedState.hooksRegistered = false;
 		if (sharedState.intervalId) {
 			clearInterval(sharedState.intervalId);
