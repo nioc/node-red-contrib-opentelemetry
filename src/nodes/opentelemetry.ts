@@ -394,15 +394,38 @@ function consoleLog(
 	}
 }
 
+function maskUrlCredentials(urlValue: string): string {
+	try {
+		const parsedUrl = new URL(urlValue);
+		if (parsedUrl.password.length > 0) {
+			parsedUrl.password = "***";
+			return parsedUrl.toString();
+		}
+		return urlValue;
+	} catch {
+		return urlValue;
+	}
+}
+
 function formatStartupConfigSummary(config: ResolvedOTELConfig): string {
 	const attributeMappingsCount = Array.isArray(config.attributeMappings)
 		? config.attributeMappings.length
 		: 0;
-	const tracesUrl = config.tracesEnabled ? config.url ?? "n/a" : "disabled";
-	const metricsUrl = config.metricsEnabled
-		? config.metricsUrl ?? "n/a"
+	const tracesUrl = config.tracesEnabled
+		? config.url
+			? maskUrlCredentials(config.url)
+			: "n/a"
 		: "disabled";
-	const logsUrl = config.logsEnabled ? config.logsUrl ?? "n/a" : "disabled";
+	const metricsUrl = config.metricsEnabled
+		? config.metricsUrl
+			? maskUrlCredentials(config.metricsUrl)
+			: "n/a"
+		: "disabled";
+	const logsUrl = config.logsEnabled
+		? config.logsUrl
+			? maskUrlCredentials(config.logsUrl)
+			: "n/a"
+		: "disabled";
 
 	return [
 		`serviceName=${String(config.serviceName)}`,
@@ -1779,7 +1802,7 @@ module.exports = (RED: RuntimeApi) => {
 		);
 		consoleLog(
 			"debug",
-			`OpenTelemetry startup endpoints: traces(${tracesProtocol})=${url ?? "disabled"}, metrics(${metricsProtocol})=${metricsUrl ?? "disabled"}, logs(${logsProtocol})=${logsUrl ?? "disabled"}`,
+			`OpenTelemetry startup endpoints: traces(${tracesProtocol})=${url ? maskUrlCredentials(url) : "disabled"}, metrics(${metricsProtocol})=${metricsUrl ? maskUrlCredentials(metricsUrl) : "disabled"}, logs(${logsProtocol})=${logsUrl ? maskUrlCredentials(logsUrl) : "disabled"}`,
 		);
 		if (
 			!trackLifecycle &&
@@ -1849,13 +1872,7 @@ module.exports = (RED: RuntimeApi) => {
 				error,
 			);
 		});
-		this.on("close", async (...args: unknown[]) => {
-			const done =
-				typeof args[0] === "function"
-					? (args[0] as () => void)
-					: typeof args[1] === "function"
-						? (args[1] as () => void)
-						: undefined;
+		this.on("close", async () => {
 			try {
 				activeConfigNodes = Math.max(activeConfigNodes - 1, 0);
 				if (activeConfigNodes === 0) {
@@ -1863,8 +1880,6 @@ module.exports = (RED: RuntimeApi) => {
 				}
 			} catch (error) {
 				consoleLog("error", "OpenTelemetry config-node shutdown failed.", error);
-			} finally {
-				if (typeof done === "function") done();
 			}
 		});
 	}
@@ -1929,6 +1944,8 @@ module.exports.__test__ = {
 		sharedState.logLevel = resolveLogLevel(value) || DEFAULT_LOG_LEVEL;
 	},
 	resolveOpenTelemetryConfig,
+	maskUrlCredentials,
+	formatStartupConfigSummary,
 	logEvent,
 	getMsgSpans: () => msgSpans,
 	clearInterval: () => {
