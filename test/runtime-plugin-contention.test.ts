@@ -29,6 +29,7 @@ test("OpenTelemetry runtime plugin contention: settings updates reuse hooks and 
 		nodes: {
 			getNode: () => undefined,
 		},
+		settings: {},
 		hooks: {
 			add: () => {
 				hooksAdded++;
@@ -38,8 +39,15 @@ test("OpenTelemetry runtime plugin contention: settings updates reuse hooks and 
 			},
 		},
 		plugins: {
-			registerRuntimePlugin: (plugin) => {
-				runtimePlugin = plugin;
+			registerPlugin: (_id, plugin) => {
+				runtimePlugin = {
+					onSettings: async (settings) => {
+						mockRed.settings.opentelemetry =
+							(settings && settings.opentelemetry) || settings || {};
+						return plugin.onadd?.();
+					},
+					onClose: async () => plugin.onremove?.(),
+				};
 			},
 		},
 	};

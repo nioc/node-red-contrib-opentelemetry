@@ -56,30 +56,51 @@ This module runs as a **Node-RED runtime plugin**.
 Configure it via `settings.js` under `opentelemetry` (or use environment variables only). No flow node or config node is required.
 
 ```js
-opentelemetry: {
-  url: "http://localhost:4318/v1/traces",
-  metricsUrl: "http://localhost:4318/v1/metrics",
-  logsUrl: "http://localhost:4318/v1/logs",
-  protocol: "http",
-  serviceName: "Node-RED",
-  tracesEnabled: true,
-  metricsEnabled: false,
-  logsEnabled: false,
-}
+// settings.js
+module.exports = {
+  // ...
+  opentelemetry: {
+    url: "http://localhost:4318/v1/traces",
+    metricsUrl: "http://localhost:4318/v1/metrics",
+    logsUrl: "http://localhost:4318/v1/logs",
+    protocol: "http", // "http" (json) or "proto" (protobuf)
+    serviceName: "Node-RED",
+    tracesEnabled: true,
+    metricsEnabled: false,
+    logsEnabled: false,
+    rootPrefix: "",
+    ignoredNodeTypes: "debug,catch",
+    propagateHeaderNodeTypes: "http request,mqtt out",
+    logLevel: "warn",
+    timeout: 10,
+    attributeMappings: [
+      {
+        isAfter: false,
+        flow: "",
+        nodeType: "http in",
+        key: "http.method",
+        path: "req.method",
+      },
+    ],
+  },
+};
 ```
 
-Config fields:
--   **Traces URL**: OTLP endpoint for traces (e.g., `http://localhost:4318/v1/traces`).
--   **Metrics URL**: OTLP endpoint for metrics (e.g., `http://localhost:4318/v1/metrics`).
--   **Logs URL**: OTLP endpoint for logs (e.g., `http://localhost:4318/v1/logs`).
--   **Enable Signals**: Enable/disable Traces, Metrics, and Logs individually.
--   **Protocol**: `http/json` or `http/protobuf`.
--   **Service Name**: Service name shown in your telemetry backend.
--   **Root Span Name Prefix**: Optional prefix for root span names (default: empty).
--   **Ignored Node Types**: Comma-separated Node-RED node types excluded from tracing.
--   **Propagate**: Comma-separated node types that should propagate trace headers.
--   **Timeout**: Seconds after which an unmodified message span is closed.
--   **Span Attribute Mappings**: Custom attributes using [JMESPath](https://jmespath.org/) on `msg`.
+Restart Node-RED after changing plugin settings.
+
+Config fields (`settings.js` -> `opentelemetry`):
+-   **url**: OTLP traces endpoint (e.g., `http://localhost:4318/v1/traces`).
+-   **metricsUrl**: OTLP metrics endpoint (e.g., `http://localhost:4318/v1/metrics`).
+-   **logsUrl**: OTLP logs endpoint (e.g., `http://localhost:4318/v1/logs`).
+-   **tracesEnabled / metricsEnabled / logsEnabled**: Enable/disable signals independently.
+-   **protocol**: `http` (json) or `proto` (protobuf).
+-   **serviceName**: Service name shown in your telemetry backend.
+-   **rootPrefix**: Optional prefix for root span names.
+-   **ignoredNodeTypes**: Comma-separated Node-RED node types excluded from tracing.
+-   **propagateHeaderNodeTypes**: Comma-separated node types that should propagate trace headers.
+-   **logLevel**: `off`, `error`, `warn`, `info`, or `debug`.
+-   **timeout**: Seconds after which an unmodified message span is closed.
+-   **attributeMappings**: Custom attributes using [JMESPath](https://jmespath.org/) on `msg`.
 
 ### How It Works
 
@@ -113,10 +134,12 @@ Environment values are applied only when the corresponding plugin setting is uns
 
 ## Examples
 
-Example flows are provided in the [examples/](examples/) directory:
-- [OpenTelemetry.json](examples/OpenTelemetry.json): A complete tracing demonstration flow.
+Examples are provided in the [examples/](examples/) directory:
+- [OpenTelemetry.json](examples/OpenTelemetry.json): A tracing demonstration flow.
+- [opentelemetry.settings.example.js](examples/opentelemetry.settings.example.js): A `settings.js` plugin config snippet.
 
-You can import these into Node-RED using **Import** from the main menu (Ctrl-I).
+Import the flow using **Import** (Ctrl-I), then configure the runtime plugin in `settings.js`.
+For a full settings reference, see [docs/plugin-configuration.md](docs/plugin-configuration.md).
 
 ## Versioning
 
