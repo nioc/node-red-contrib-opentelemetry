@@ -1,4 +1,5 @@
 import os from "node:os";
+import { EventEmitter } from "node:events";
 import type {
 	NodeAPI,
 	NodeDef,
@@ -107,6 +108,7 @@ interface OTELConfig {
 	tracesEnabled?: boolean;
 	metricsEnabled?: boolean;
 	logsEnabled?: boolean;
+	flowEventLogsEnabled?: boolean;
 	rootPrefix?: string;
 	ignoredNodeTypes?: string;
 	propagateHeaderNodeTypes?: string;
@@ -136,6 +138,7 @@ interface ResolvedOTELConfig {
 	tracesEnabled: boolean;
 	metricsEnabled: boolean;
 	logsEnabled: boolean;
+	flowEventLogsEnabled: boolean;
 	rootPrefix: string;
 	ignoredNodeTypes: string;
 	propagateHeaderNodeTypes: string;
@@ -209,6 +212,27 @@ type RuntimePluginRegistration = {
 	onremove?: () => Promise<void> | void;
 	[key: string]: unknown;
 };
+type NodeRedUtilLogApi = {
+	INFO?: unknown;
+	ERROR?: unknown;
+	WARN?: unknown;
+	DEBUG?: unknown;
+	TRACE?: unknown;
+	FATAL?: unknown;
+	AUDIT?: unknown;
+	METRIC?: unknown;
+	addHandler?: (handler: EventEmitter) => void;
+	removeHandler?: (handler: EventEmitter) => void;
+};
+type NodeRedLogEntry = {
+	level?: unknown;
+	msg?: unknown;
+	type?: string;
+	id?: string;
+	name?: string;
+	timestamp?: unknown;
+	[key: string]: unknown;
+};
 type RuntimeApi = NodeAPI & {
 	plugins: NodeAPI["plugins"] & {
 		registerPlugin?: (id: string, plugin: RuntimePluginRegistration) => void;
@@ -235,6 +259,9 @@ interface SharedState {
 	};
 	intervalId: NodeJS.Timeout | null;
 	hooksRegistered: boolean;
+	nodeRedLogApi: NodeRedUtilLogApi | null;
+	nodeRedLogHandler: EventEmitter | null;
+	flowEventLogsEnabled: boolean;
 }
 
 // Shared state for all node instances
@@ -255,6 +282,9 @@ const sharedState: SharedState = {
 	},
 	intervalId: null,
 	hooksRegistered: false,
+	nodeRedLogApi: null,
+	nodeRedLogHandler: null,
+	flowEventLogsEnabled: true,
 };
 
 const DEFAULT_OTEL_TRACE_URL = "http://localhost:4318/v1/traces";
@@ -471,6 +501,159 @@ function consoleLog(
 	}
 }
 
+function stringifyLogBody(value: unknown): string {
+	if (typeof value === "string") {
+		return value;
+	}
+	if (value instanceof Error) {
+		return value.stack || value.message;
+	}
+	if (value === null || value === undefined) {
+		return "";
+	}
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
+	}
+}
+
+function getNodeRedUtilLogApi(): NodeRedUtilLogApi | null {
+	if (sharedState.nodeRedLogApi) {
+		return sharedState.nodeRedLogApi;
+	}
+	try {
+		const nodeRedUtil = require("@node-red/util") as { log?: NodeRedUtilLogApi };
+		if (nodeRedUtil?.log) {
+			sharedState.nodeRedLogApi = nodeRedUtil.log;
+			return nodeRedUtil.log;
+		}
+	} catch {}
+	return null;
+}
+
+function resolveNodeRedSeverity(
+	level: unknown,
+	logApi: NodeRedUtilLogApi | null,
+): { severityNumber: SeverityNumber; severityText: string } {
+	if (level !== undefined && logApi) {
+		const numericLevel =
+			typeof level === "string" && /^\d+$/u.test(level.trim())
+				? Number(level)
+				: level;
+		if (numericLevel === logApi.FATAL) {
+			return { severityNumber: SeverityNumber.FATAL, severityText: "FATAL" };
+		}
+		if (numericLevel === logApi.ERROR) {
+			return { severityNumber: SeverityNumber.ERROR, severityText: "ERROR" };
+		}
+		if (numericLevel === logApi.WARN) {
+			return { severityNumber: SeverityNumber.WARN, severityText: "WARN" };
+		}
+		if (numericLevel === logApi.DEBUG) {
+			return { severityNumber: SeverityNumber.DEBUG, severityText: "DEBUG" };
+		}
+		if (numericLevel === logApi.TRACE) {
+			return { severityNumber: SeverityNumber.TRACE, severityText: "TRACE" };
+		}
+	}
+	const normalizedLevel = String(level ?? "").trim().toLowerCase();
+	switch (normalizedLevel) {
+		case "fatal":
+			return { severityNumber: SeverityNumber.FATAL, severityText: "FATAL" };
+		case "error":
+			return { severityNumber: SeverityNumber.ERROR, severityText: "ERROR" };
+		case "warn":
+		case "warning":
+			return { severityNumber: SeverityNumber.WARN, severityText: "WARN" };
+		case "debug":
+			return { severityNumber: SeverityNumber.DEBUG, severityText: "DEBUG" };
+		case "trace":
+			return { severityNumber: SeverityNumber.TRACE, severityText: "TRACE" };
+		case "audit":
+		case "metric":
+		case "info":
+		default:
+			return { severityNumber: SeverityNumber.INFO, severityText: "INFO" };
+	}
+}
+
+function emitNodeRedRuntimeLog(entry: NodeRedLogEntry): void {
+	if (!sharedState.logger) {
+		return;
+	}
+	const logApi = getNodeRedUtilLogApi();
+	const body = stringifyLogBody(entry.msg);
+	if (!body) {
+		return;
+	}
+	const { severityNumber, severityText } = resolveNodeRedSeverity(
+		entry.level,
+		logApi,
+	);
+	const attributes: Record<string, string | number> = {
+		"node_red.event_type": "runtime.log",
+		"node_red.log.level": severityText.toLowerCase(),
+	};
+	if (entry.type) {
+		attributes["node_red.log.type"] = String(entry.type);
+	}
+	if (entry.id) {
+		attributes["node_red.log.id"] = String(entry.id);
+	}
+	if (entry.name) {
+		attributes["node_red.log.name"] = String(entry.name);
+	}
+	if (typeof entry.timestamp === "number") {
+		attributes["node_red.log.timestamp"] = entry.timestamp;
+	}
+	sharedState.logger.emit({
+		severityNumber,
+		severityText,
+		body,
+		attributes,
+		context: context.active(),
+	});
+}
+
+function unregisterNodeRedLogHandler(): void {
+	if (!sharedState.nodeRedLogHandler) {
+		return;
+	}
+	const logApi = getNodeRedUtilLogApi();
+	try {
+		logApi?.removeHandler?.(sharedState.nodeRedLogHandler);
+	} catch (error) {
+		consoleLog("debug", "Failed to remove Node-RED log handler", error);
+	}
+	sharedState.nodeRedLogHandler.removeAllListeners("log");
+	sharedState.nodeRedLogHandler = null;
+}
+
+function registerNodeRedLogHandler(): void {
+	if (!sharedState.logger || sharedState.nodeRedLogHandler) {
+		return;
+	}
+	const logApi = getNodeRedUtilLogApi();
+	if (!logApi?.addHandler) {
+		return;
+	}
+	const handler = new EventEmitter();
+	handler.on("log", (entry: NodeRedLogEntry) => {
+		try {
+			emitNodeRedRuntimeLog(entry);
+		} catch (error) {
+			consoleLog("debug", "Failed to emit Node-RED runtime log", error);
+		}
+	});
+	try {
+		logApi.addHandler(handler);
+		sharedState.nodeRedLogHandler = handler;
+	} catch (error) {
+		consoleLog("warn", "Failed to register Node-RED log handler", error);
+	}
+}
+
 function maskUrlCredentials(urlValue: string): string {
 	try {
 		const parsedUrl = new URL(urlValue);
@@ -514,6 +697,7 @@ function formatStartupConfigSummary(config: ResolvedOTELConfig): string {
 		`metricsProtocol=${String(config.metricsProtocol)}`,
 		`metricsUrl=${metricsUrl}`,
 		`logsEnabled=${String(config.logsEnabled)}`,
+		`flowEventLogsEnabled=${String(config.flowEventLogsEnabled)}`,
 		`logsProtocol=${String(config.logsProtocol)}`,
 		`logsUrl=${logsUrl}`,
 		`rootPrefix=${String(config.rootPrefix)}`,
@@ -662,6 +846,7 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 			logsEnabledFromEnv ??
 			config.logsEnabled ??
 			(hasLogsOtlpEnvConfig ? true : false),
+		flowEventLogsEnabled: config.flowEventLogsEnabled ?? true,
 		rootPrefix: config.rootPrefix ?? DEFAULT_ROOT_SPAN_NAME_PREFIX,
 		ignoredNodeTypes:
 			ignoredNodeTypesEnv ??
@@ -890,7 +1075,9 @@ function logEvent(
 	event: RuntimeHookEvent,
 ): void {
 	const emitConsole = shouldLog("debug");
-	const emitOtelLogger = sharedState.logger && shouldLog("info");
+	// Structured OTel logs follow the logs signal enablement (logger presence),
+	// while logLevel controls plugin diagnostics written to console.
+	const emitOtelLogger = sharedState.logger && sharedState.flowEventLogsEnabled;
 	if (!emitConsole && !emitOtelLogger) {
 		return;
 	}
@@ -1513,6 +1700,7 @@ function applyResolvedRuntimeConfig(resolvedConfig: ResolvedOTELConfig): void {
 	sharedState.propagateHeaderNodeTypesList = splitCsv(
 		resolvedConfig.propagateHeaderNodeTypes,
 	);
+	sharedState.flowEventLogsEnabled = resolvedConfig.flowEventLogsEnabled;
 }
 
 function createCommonResource(serviceName: string): Resource {
@@ -1835,6 +2023,7 @@ function registerRuntimeHooks(RED: RuntimeApi): void {
 }
 
 async function shutdownSignalProviders(): Promise<void> {
+	unregisterNodeRedLogHandler();
 	if (sharedState.provider) {
 		await sharedState.provider.shutdown();
 		sharedState.provider = null;
@@ -1928,10 +2117,15 @@ module.exports = (RED: RuntimeApi) => {
 			metricsProtocol,
 			metricsUrl,
 		);
-		initializeLoggerProvider(commonResource, logsEnabled, logsProtocol, logsUrl);
-		if (!sharedState.hooksRegistered) {
-			registerRuntimeHooks(RED);
-		}
+	initializeLoggerProvider(commonResource, logsEnabled, logsProtocol, logsUrl);
+	if (sharedState.logger) {
+		registerNodeRedLogHandler();
+	} else {
+		unregisterNodeRedLogHandler();
+	}
+	if (!sharedState.hooksRegistered) {
+		registerRuntimeHooks(RED);
+	}
 
 	}
 
@@ -2037,7 +2231,10 @@ module.exports.__test__ = {
 		msgSpans.clear();
 		completedHttpMetricsMsgIds.clear();
 		completedHttpResponseMsgIds.clear();
+		unregisterNodeRedLogHandler();
+		sharedState.nodeRedLogApi = null;
 		sharedState.logLevel = DEFAULT_LOG_LEVEL;
+		sharedState.flowEventLogsEnabled = true;
 		sharedState.rootPrefix = "";
 		sharedState.timeout = 10;
 		sharedState.attributeMappings = [];

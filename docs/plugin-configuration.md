@@ -17,6 +17,7 @@ module.exports = {
 		tracesEnabled: true,
 		metricsEnabled: false,
 		logsEnabled: false,
+		flowEventLogsEnabled: true,
 		rootPrefix: "",
 		ignoredNodeTypes: "debug,catch",
 		propagateHeaderNodeTypes: "http request,mqtt out",
@@ -46,7 +47,8 @@ Restart Node-RED after changing these settings.
 - `serviceName`: OpenTelemetry service name.
 - `tracesEnabled`: Enable trace export.
 - `metricsEnabled`: Enable metric export.
-- `logsEnabled`: Enable log export.
+- `logsEnabled`: Enable log export (flow hook events and Node-RED runtime logger events).
+- `flowEventLogsEnabled`: Enable/disable flow hook event logs while keeping runtime logger forwarding.
 - `rootPrefix`: Prefix added to root span names.
 - `ignoredNodeTypes`: Comma-separated node types excluded from tracing.
 - `propagateHeaderNodeTypes`: Comma-separated node types for context propagation.

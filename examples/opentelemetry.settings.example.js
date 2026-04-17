@@ -11,6 +11,7 @@ module.exports = {
 		tracesEnabled: true,
 		metricsEnabled: false,
 		logsEnabled: false,
+		flowEventLogsEnabled: true,
 		rootPrefix: "",
 		ignoredNodeTypes: "debug,catch",
 		propagateHeaderNodeTypes: "http request,mqtt out",
