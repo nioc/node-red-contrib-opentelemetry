@@ -2,7 +2,6 @@ const handlers = new Set();
 
 module.exports = {
 	log: {
-		log: () => {},
 		FATAL: 10,
 		ERROR: 20,
 		WARN: 30,
