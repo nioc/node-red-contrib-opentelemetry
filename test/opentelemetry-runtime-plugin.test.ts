@@ -192,7 +192,7 @@ test("resolveOpenTelemetryConfig reads OTEL env values when node uses defaults",
 	assert.equal(config.serviceName, "env-service");
 });
 
-test("resolveOpenTelemetryConfig keeps explicit node settings over env values", () => {
+test("resolveOpenTelemetryConfig gives OTEL env values precedence over explicit settings", () => {
 	process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT =
 		"http://collector:4318/v1/traces";
 	process.env.OTEL_EXPORTER_OTLP_TRACES_PROTOCOL = "http/json";
@@ -202,9 +202,9 @@ test("resolveOpenTelemetryConfig keeps explicit node settings over env values", 
 		protocol: "proto",
 		serviceName: "custom-service",
 	});
-	assert.equal(config.url, "http://custom:4318/v1/traces");
-	assert.equal(config.protocol, "proto");
-	assert.equal(config.serviceName, "custom-service");
+	assert.equal(config.url, "http://collector:4318/v1/traces");
+	assert.equal(config.protocol, "http");
+	assert.equal(config.serviceName, "env-service");
 });
 
 test("resolveOpenTelemetryConfig supports trace-specific env overrides", () => {
@@ -244,10 +244,10 @@ test("resolveOpenTelemetryConfig reads log level from env variable", () => {
 	assert.equal(config.logLevel, "debug");
 });
 
-test("resolveOpenTelemetryConfig uses explicit config log level over env", () => {
+test("resolveOpenTelemetryConfig gives env log level precedence over explicit config", () => {
 	process.env.OTEL_LOG_LEVEL = "error";
 	const config = resolveOpenTelemetryConfig({ logLevel: "info" });
-	assert.equal(config.logLevel, "info");
+	assert.equal(config.logLevel, "error");
 });
 
 test("resolveOpenTelemetryConfig reads ignoredNodeTypes from env variable", () => {
@@ -256,7 +256,7 @@ test("resolveOpenTelemetryConfig reads ignoredNodeTypes from env variable", () =
 	assert.equal(config.ignoredNodeTypes, "debug,catch,inject");
 });
 
-test("resolveOpenTelemetryConfig keeps explicit ignoredNodeTypes over env", () => {
+test("resolveOpenTelemetryConfig gives env ignoredNodeTypes precedence over explicit", () => {
 	process.env.IGNORED_NODE_TYPES = "debug,catch,inject";
 	const config = resolveOpenTelemetryConfig({ ignoredNodeTypes: "debug,catch" });
 	assert.equal(config.ignoredNodeTypes, "debug,catch,inject");
@@ -264,7 +264,13 @@ test("resolveOpenTelemetryConfig keeps explicit ignoredNodeTypes over env", () =
 	const explicit = resolveOpenTelemetryConfig({
 		ignoredNodeTypes: "debug,inject",
 	});
-	assert.equal(explicit.ignoredNodeTypes, "debug,inject");
+	assert.equal(explicit.ignoredNodeTypes, "debug,catch,inject");
+});
+
+test("resolveOpenTelemetryConfig preserves explicit empty ignoredNodeTypes", () => {
+	delete process.env.IGNORED_NODE_TYPES;
+	const config = resolveOpenTelemetryConfig({ ignoredNodeTypes: "" });
+	assert.equal(config.ignoredNodeTypes, "");
 });
 
 test("resolveOpenTelemetryConfig appends signal paths for specific endpoints without path", () => {
