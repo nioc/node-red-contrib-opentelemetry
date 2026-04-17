@@ -305,6 +305,53 @@ function ensureSignalPath(
 	return parsed.toString();
 }
 
+function ensureSignalPathFromGenericEndpoint(
+	urlValue: string | undefined,
+	signalPath: "/v1/traces" | "/v1/metrics" | "/v1/logs",
+): string | undefined {
+	if (!urlValue) return urlValue;
+	if (!URL.canParse(String(urlValue))) {
+		return urlValue;
+	}
+	const parsed = new URL(String(urlValue));
+	if (parsed.pathname === "/" || parsed.pathname === "") {
+		parsed.pathname = signalPath;
+		return parsed.toString();
+	}
+	const trimmedPath = parsed.pathname.replace(/\/+$/, "");
+	const remappedPath = trimmedPath.replace(
+		/\/v1\/(?:traces|metrics|logs)$/u,
+		signalPath,
+	);
+	if (remappedPath !== trimmedPath) {
+		parsed.pathname = remappedPath;
+		return parsed.toString();
+	}
+	if (!trimmedPath.endsWith(signalPath)) {
+		parsed.pathname = `${trimmedPath}${signalPath}`;
+	}
+	return parsed.toString();
+}
+
+function normalizeGrpcEndpoint(urlValue: string | undefined): string | undefined {
+	if (!urlValue) return urlValue;
+	if (
+		urlValue === DEFAULT_OTEL_TRACE_URL ||
+		urlValue === DEFAULT_OTEL_METRICS_URL ||
+		urlValue === DEFAULT_OTEL_LOGS_URL
+	) {
+		return DEFAULT_OTEL_GRPC_URL;
+	}
+	if (!URL.canParse(String(urlValue))) {
+		return urlValue;
+	}
+	const parsed = new URL(String(urlValue));
+	if (/\/v1\/(?:traces|metrics|logs)\/?$/u.test(parsed.pathname)) {
+		parsed.pathname = "/";
+	}
+	return parsed.toString();
+}
+
 function parseNodeUrl(
 	urlValue: string,
 ): { url: URL; isAbsolute: boolean } | undefined {
@@ -530,18 +577,26 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 		resolveLogLevel(logLevelEnv) ||
 		resolveLogLevel(config.logLevel) ||
 		DEFAULT_LOG_LEVEL;
+	const configuredGenericEndpoint = config.url || undefined;
+	const configuredMetricsEndpoint = config.metricsUrl || undefined;
+	const configuredLogsEndpoint = config.logsUrl || undefined;
 	const configuredTraceUrl = ensureSignalPath(
-		config.url || DEFAULT_OTEL_TRACE_URL,
+		configuredGenericEndpoint || DEFAULT_OTEL_TRACE_URL,
 		"/v1/traces",
 	);
-	const configuredMetricsUrl = ensureSignalPath(
-		config.metricsUrl || DEFAULT_OTEL_METRICS_URL,
-		"/v1/metrics",
-	);
-	const configuredLogsUrl = ensureSignalPath(
-		config.logsUrl || DEFAULT_OTEL_LOGS_URL,
-		"/v1/logs",
-	);
+	const configuredMetricsUrl = configuredMetricsEndpoint
+		? ensureSignalPath(configuredMetricsEndpoint, "/v1/metrics")
+		: configuredGenericEndpoint
+			? ensureSignalPathFromGenericEndpoint(
+				configuredGenericEndpoint,
+				"/v1/metrics",
+			)
+			: ensureSignalPath(DEFAULT_OTEL_METRICS_URL, "/v1/metrics");
+	const configuredLogsUrl = configuredLogsEndpoint
+		? ensureSignalPath(configuredLogsEndpoint, "/v1/logs")
+		: configuredGenericEndpoint
+			? ensureSignalPathFromGenericEndpoint(configuredGenericEndpoint, "/v1/logs")
+			: ensureSignalPath(DEFAULT_OTEL_LOGS_URL, "/v1/logs");
 	const tracesEnabledFromEnv = resolveSignalEnabledFromEnv(tracesExporterEnv);
 	const metricsEnabledFromEnv = resolveSignalEnabledFromEnv(metricsExporterEnv);
 	const logsEnabledFromEnv = resolveSignalEnabledFromEnv(logsExporterEnv);
@@ -549,15 +604,17 @@ function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 	const hasLogsOtlpEnvConfig = Boolean(selectedLogsEndpoint);
 	const configuredTraceEndpointForProtocol =
 		tracesProtocol === "grpc"
-			? config.url || DEFAULT_OTEL_GRPC_URL
+			? normalizeGrpcEndpoint(configuredGenericEndpoint) || DEFAULT_OTEL_GRPC_URL
 			: configuredTraceUrl;
 	const configuredMetricsEndpointForProtocol =
 		metricsProtocol === "grpc"
-			? config.metricsUrl || config.url || DEFAULT_OTEL_GRPC_URL
+			? normalizeGrpcEndpoint(configuredMetricsEndpoint ?? configuredGenericEndpoint) ||
+				DEFAULT_OTEL_GRPC_URL
 			: configuredMetricsUrl;
 	const configuredLogsEndpointForProtocol =
 		logsProtocol === "grpc"
-			? config.logsUrl || config.url || DEFAULT_OTEL_GRPC_URL
+			? normalizeGrpcEndpoint(configuredLogsEndpoint ?? configuredGenericEndpoint) ||
+				DEFAULT_OTEL_GRPC_URL
 			: configuredLogsUrl;
 
 	return {
