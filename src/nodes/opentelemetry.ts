@@ -394,6 +394,59 @@ function consoleLog(
 	}
 }
 
+function maskUrlCredentials(urlValue: string): string {
+	try {
+		const parsedUrl = new URL(urlValue);
+		if (parsedUrl.password.length > 0) {
+			parsedUrl.password = "***";
+			return parsedUrl.toString();
+		}
+		return urlValue;
+	} catch {
+		return urlValue;
+	}
+}
+
+function formatStartupConfigSummary(config: ResolvedOTELConfig): string {
+	const attributeMappingsCount = Array.isArray(config.attributeMappings)
+		? config.attributeMappings.length
+		: 0;
+	const tracesUrl = config.tracesEnabled
+		? config.url
+			? maskUrlCredentials(config.url)
+			: "n/a"
+		: "disabled";
+	const metricsUrl = config.metricsEnabled
+		? config.metricsUrl
+			? maskUrlCredentials(config.metricsUrl)
+			: "n/a"
+		: "disabled";
+	const logsUrl = config.logsEnabled
+		? config.logsUrl
+			? maskUrlCredentials(config.logsUrl)
+			: "n/a"
+		: "disabled";
+
+	return [
+		`serviceName=${String(config.serviceName)}`,
+		`logLevel=${String(config.logLevel)}`,
+		`tracesEnabled=${String(config.tracesEnabled)}`,
+		`tracesProtocol=${String(config.tracesProtocol)}`,
+		`tracesUrl=${tracesUrl}`,
+		`metricsEnabled=${String(config.metricsEnabled)}`,
+		`metricsProtocol=${String(config.metricsProtocol)}`,
+		`metricsUrl=${metricsUrl}`,
+		`logsEnabled=${String(config.logsEnabled)}`,
+		`logsProtocol=${String(config.logsProtocol)}`,
+		`logsUrl=${logsUrl}`,
+		`rootPrefix=${String(config.rootPrefix)}`,
+		`ignoredNodeTypes=${String(config.ignoredNodeTypes)}`,
+		`propagateHeaderNodeTypes=${String(config.propagateHeaderNodeTypes)}`,
+		`timeout=${String(config.timeout)}`,
+		`attributeMappings=${String(attributeMappingsCount)}`,
+	].join(", ");
+}
+
 function resolveOpenTelemetryConfig(config: OTELConfig): ResolvedOTELConfig {
 	const env = process.env;
 	const tracesEndpoint = env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT;
@@ -1687,6 +1740,11 @@ module.exports = (RED: RuntimeApi) => {
 			RED.nodes.registerType("OpenTelemetry", OpenTelemetryNode);
 		} catch (error) {
 			if (!isAlreadyRegisteredError(error)) {
+				consoleLog(
+					"error",
+					"Failed to register Node-RED config node type 'OpenTelemetry'.",
+					error,
+				);
 				throw error;
 			}
 			consoleLog(
@@ -1701,6 +1759,11 @@ module.exports = (RED: RuntimeApi) => {
 			RED.plugins?.registerRuntimePlugin?.(plugin);
 		} catch (error) {
 			if (!isAlreadyRegisteredError(error)) {
+				consoleLog(
+					"error",
+					"Failed to register Node-RED runtime plugin 'opentelemetry-runtime'.",
+					error,
+				);
 				throw error;
 			}
 			consoleLog(
@@ -1733,31 +1796,13 @@ module.exports = (RED: RuntimeApi) => {
 			logsEnabled,
 		} = resolvedConfig;
 		applyResolvedRuntimeConfig(resolvedConfig);
-		const startupConfigSummary = {
-			serviceName,
-			logLevel: resolvedConfig.logLevel,
-			tracesEnabled,
-			tracesProtocol,
-			tracesUrl: tracesEnabled ? url : "disabled",
-			metricsEnabled,
-			metricsProtocol,
-			metricsUrl: metricsEnabled ? metricsUrl : "disabled",
-			logsEnabled,
-			logsProtocol,
-			logsUrl: logsEnabled ? logsUrl : "disabled",
-			rootPrefix: resolvedConfig.rootPrefix,
-			ignoredNodeTypes: resolvedConfig.ignoredNodeTypes,
-			propagateHeaderNodeTypes: resolvedConfig.propagateHeaderNodeTypes,
-			timeout: resolvedConfig.timeout,
-			attributeMappings: resolvedConfig.attributeMappings.length,
-		};
 		consoleLog(
 			"warn",
-			`OpenTelemetry startup config: ${JSON.stringify(startupConfigSummary)}`,
+			`OpenTelemetry startup config: ${formatStartupConfigSummary(resolvedConfig)}`,
 		);
 		consoleLog(
 			"debug",
-			`OpenTelemetry startup endpoints: traces(${tracesProtocol})=${url ?? "disabled"}, metrics(${metricsProtocol})=${metricsUrl ?? "disabled"}, logs(${logsProtocol})=${logsUrl ?? "disabled"}`,
+			`OpenTelemetry startup endpoints: traces(${tracesProtocol})=${url ? maskUrlCredentials(url) : "disabled"}, metrics(${metricsProtocol})=${metricsUrl ? maskUrlCredentials(metricsUrl) : "disabled"}, logs(${logsProtocol})=${logsUrl ? maskUrlCredentials(logsUrl) : "disabled"}`,
 		);
 		if (
 			!trackLifecycle &&
@@ -1820,19 +1865,22 @@ module.exports = (RED: RuntimeApi) => {
 	function OpenTelemetryNode(this: RedNodeInstance, config: OTELNodeDef) {
 		RED.nodes.createNode(this, config);
 		activeConfigNodes++;
-		void initOTEL(config, { trackLifecycle: false });
-		this.on("close", async (...args: unknown[]) => {
-			const done =
-				typeof args[0] === "function"
-					? (args[0] as () => void)
-					: typeof args[1] === "function"
-						? (args[1] as () => void)
-						: undefined;
-			activeConfigNodes = Math.max(activeConfigNodes - 1, 0);
-			if (activeConfigNodes === 0) {
-				await stopOTEL();
+		void initOTEL(config, { trackLifecycle: false }).catch((error) => {
+			consoleLog(
+				"error",
+				"OpenTelemetry config-node initialization failed.",
+				error,
+			);
+		});
+		this.on("close", async () => {
+			try {
+				activeConfigNodes = Math.max(activeConfigNodes - 1, 0);
+				if (activeConfigNodes === 0) {
+					await stopOTEL();
+				}
+			} catch (error) {
+				consoleLog("error", "OpenTelemetry config-node shutdown failed.", error);
 			}
-			if (typeof done === "function") done();
 		});
 	}
 	registerNodeTypeOnce();
@@ -1843,28 +1891,36 @@ module.exports = (RED: RuntimeApi) => {
 		registerRuntimePluginOnce({
 			id: "opentelemetry-runtime",
 			onSettings: async (settings: unknown) => {
-				if (activeConfigNodes > 0) {
-					return;
+				try {
+					if (activeConfigNodes > 0) {
+						return;
+					}
+					let pluginConfig: OTELConfig = {};
+					// We can read from settings.js if needed
+					if (
+						typeof settings === "object" &&
+						settings !== null &&
+						"opentelemetry" in settings
+					) {
+						const pluginSettings = settings as { opentelemetry?: OTELConfig };
+						pluginConfig = pluginSettings.opentelemetry ?? {};
+					}
+					await initOTEL(pluginConfig, { trackLifecycle: false });
+					runtimePluginInitialized = true;
+				} catch (error) {
+					consoleLog("error", "OpenTelemetry runtime plugin settings failed.", error);
 				}
-				let pluginConfig: OTELConfig = {};
-				// We can read from settings.js if needed
-				if (
-					typeof settings === "object" &&
-					settings !== null &&
-					"opentelemetry" in settings
-				) {
-					const pluginSettings = settings as { opentelemetry?: OTELConfig };
-					pluginConfig = pluginSettings.opentelemetry ?? {};
-				}
-				await initOTEL(pluginConfig, { trackLifecycle: false });
-				runtimePluginInitialized = true;
 			},
 			onClose: async () => {
-				if (!runtimePluginInitialized) {
-					return;
+				try {
+					if (!runtimePluginInitialized) {
+						return;
+					}
+					await stopOTEL();
+					runtimePluginInitialized = false;
+				} catch (error) {
+					consoleLog("error", "OpenTelemetry runtime plugin shutdown failed.", error);
 				}
-				await stopOTEL();
-				runtimePluginInitialized = false;
 			},
 		});
 	}
@@ -1888,6 +1944,8 @@ module.exports.__test__ = {
 		sharedState.logLevel = resolveLogLevel(value) || DEFAULT_LOG_LEVEL;
 	},
 	resolveOpenTelemetryConfig,
+	maskUrlCredentials,
+	formatStartupConfigSummary,
 	logEvent,
 	getMsgSpans: () => msgSpans,
 	clearInterval: () => {

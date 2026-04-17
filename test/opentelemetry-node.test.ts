@@ -27,6 +27,8 @@ const {
 	logEvent,
 	setLogLevel,
 	resolveOpenTelemetryConfig,
+	maskUrlCredentials,
+	formatStartupConfigSummary,
 	getSharedState,
 } = otelModule.__test__;
 
@@ -317,6 +319,43 @@ test("resolveOpenTelemetryConfig keeps explicit custom paths for node URLs", () 
 	assert.equal(config.url, "http://trace-explicit:4318/custom-traces");
 	assert.equal(config.metricsUrl, "http://metrics-explicit:4318/custom-metrics");
 	assert.equal(config.logsUrl, "http://logs-explicit:4318/custom-logs");
+});
+
+test("maskUrlCredentials redacts password in URLs", () => {
+	assert.equal(
+		maskUrlCredentials("http://user:secret@collector:4318/v1/traces"),
+		"http://user:***@collector:4318/v1/traces",
+	);
+	assert.equal(
+		maskUrlCredentials("https://collector:4318/v1/traces"),
+		"https://collector:4318/v1/traces",
+	);
+	assert.equal(maskUrlCredentials("http://[::1"), "http://[::1");
+});
+
+test("formatStartupConfigSummary masks credentials in endpoint URLs", () => {
+	const summary = formatStartupConfigSummary({
+		url: "http://user:trace-secret@trace:4318/v1/traces",
+		metricsUrl: "http://metrics:4318/v1/metrics",
+		logsUrl: "http://user:logs-secret@logs:4318/v1/logs",
+		protocol: "http",
+		tracesProtocol: "http",
+		metricsProtocol: "http",
+		logsProtocol: "http",
+		serviceName: "Node-RED",
+		tracesEnabled: true,
+		metricsEnabled: true,
+		logsEnabled: true,
+		rootPrefix: "",
+		ignoredNodeTypes: "debug,catch",
+		propagateHeaderNodeTypes: "",
+		logLevel: "warn",
+		timeout: 10,
+		attributeMappings: [],
+	});
+	assert.match(summary, /tracesUrl=http:\/\/user:\*\*\*@trace:4318\/v1\/traces/);
+	assert.match(summary, /logsUrl=http:\/\/user:\*\*\*@logs:4318\/v1\/logs/);
+	assert.doesNotMatch(summary, /trace-secret|logs-secret/);
 });
 
 test("createSpan creates parent and child spans for new messages", () => {
@@ -1946,7 +1985,7 @@ test("onSend.otel hook creates spans for every event in batch", async () => {
 	await closeHandler.call(nodeInstance);
 });
 
-test("node close waits for provider shutdown before invoking done", async () => {
+test("node close waits for provider shutdown before resolving", async () => {
 	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
@@ -1965,7 +2004,6 @@ test("node close waits for provider shutdown before invoking done", async () => 
 	otelModule(mockRed);
 
 	let closeHandler: any;
-	let doneCalled = false;
 	const nodeInstance = {
 		on: (event, handler) => {
 			if (event === "close") closeHandler = handler;
@@ -1988,18 +2026,19 @@ test("node close waits for provider shutdown before invoking done", async () => 
 			resolveShutdown = resolve;
 		});
 
-	const closePromise = closeHandler.call(nodeInstance, () => {
-		doneCalled = true;
+	let closeResolved = false;
+	const closePromise = closeHandler.call(nodeInstance).then(() => {
+		closeResolved = true;
 	});
 	await Promise.resolve();
-	assert.equal(doneCalled, false);
+	assert.equal(closeResolved, false);
 
 	resolveShutdown();
 	await closePromise;
-	assert.equal(doneCalled, true);
+	assert.equal(closeResolved, true);
 });
 
-test("node close supports (removed, done) signature", async () => {
+test("node close ignores extra args and resolves after shutdown", async () => {
 	let NodeConstructor: any;
 	const mockRed = {
 		nodes: {
@@ -2018,7 +2057,6 @@ test("node close supports (removed, done) signature", async () => {
 	otelModule(mockRed);
 
 	let closeHandler: any;
-	let doneCalled = false;
 	const nodeInstance = {
 		on: (event, handler) => {
 			if (event === "close") closeHandler = handler;
@@ -2040,15 +2078,16 @@ test("node close supports (removed, done) signature", async () => {
 			resolveShutdown = resolve;
 		});
 
-	const closePromise = closeHandler.call(nodeInstance, true, () => {
-		doneCalled = true;
+	let closeResolved = false;
+	const closePromise = closeHandler.call(nodeInstance, true, () => {}).then(() => {
+		closeResolved = true;
 	});
 	await Promise.resolve();
-	assert.equal(doneCalled, false);
+	assert.equal(closeResolved, false);
 
 	resolveShutdown();
 	await closePromise;
-	assert.equal(doneCalled, true);
+	assert.equal(closeResolved, true);
 });
 
 test("endSpan should handle orphan spans from switch nodes", () => {
