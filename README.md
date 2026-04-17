@@ -34,6 +34,7 @@ Full OpenTelemetry support (tracing, metrics, logs) for Node-RED.
 
 - OTLP logs exporter for Node-RED message events.
 - Captures flow traversal events as structured logs with context correlation.
+- Captures Node-RED runtime logger events (`info`, `warn`, `error`, etc.) through `@node-red/util.log` handlers.
 
 ## Installation
 

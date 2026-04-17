@@ -46,7 +46,7 @@ Restart Node-RED after changing these settings.
 - `serviceName`: OpenTelemetry service name.
 - `tracesEnabled`: Enable trace export.
 - `metricsEnabled`: Enable metric export.
-- `logsEnabled`: Enable log export.
+- `logsEnabled`: Enable log export (flow hook events and Node-RED runtime logger events).
 - `rootPrefix`: Prefix added to root span names.
 - `ignoredNodeTypes`: Comma-separated node types excluded from tracing.
 - `propagateHeaderNodeTypes`: Comma-separated node types for context propagation.

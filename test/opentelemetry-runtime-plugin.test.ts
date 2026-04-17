@@ -1,10 +1,20 @@
 // @ts-nocheck
+const Module = require("node:module");
 const path = require("node:path");
+const stubPath = path.join(process.cwd(), "test", "stubs", "node-red-util.cjs");
+const originalResolveFilename = Module._resolveFilename;
+Module._resolveFilename = function (request, parent, isMain, options) {
+	if (request === "@node-red/util") {
+		return stubPath;
+	}
+	return originalResolveFilename.call(this, request, parent, isMain, options);
+};
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const otelApi = require("@opentelemetry/api");
 const otelLogsApi = require("@opentelemetry/api-logs");
 const otelModule = require("../src/plugins/opentelemetry-runtime");
+const nodeRedUtilStub = require(stubPath);
 
 const mockRed = {
 	nodes: {
@@ -46,11 +56,13 @@ function resetEnv() {
 test.beforeEach(() => {
 	resetState();
 	resetEnv();
+	nodeRedUtilStub.log.reset();
 });
 
 test.afterEach(() => {
 	resetState();
 	resetEnv();
+	nodeRedUtilStub.log.reset();
 });
 
 function createFakeSpan(name, options = {}) {
@@ -535,6 +547,16 @@ test("logEvent does not write debug output when level is warn", () => {
 	const consoleLogSpy = test.mock.method(console, "log");
 	logEvent(mockRed, {}, "test", { msg: { _msgid: "1" } });
 	assert.equal(consoleLogSpy.mock.calls.length, 0);
+});
+
+test("logEvent emits structured OTel logs even when console log level is warn", () => {
+	setLogLevel("warn");
+	const logger = { emit: () => {} };
+	const emitSpy = test.mock.method(logger, "emit");
+	const sharedState = getSharedState();
+	sharedState.logger = logger;
+	logEvent(mockRed, {}, "test", { msg: { _msgid: "1" } });
+	assert.equal(emitSpy.mock.calls.length, 1);
 });
 
 test("createSpan should handle various node types correctly", () => {
@@ -1344,6 +1366,66 @@ test("runtime plugin onSettings creates only configured signal providers", async
 	assert.equal(sharedState.provider, null);
 	assert.ok(sharedState.meterProvider);
 	assert.ok(sharedState.loggerProvider);
+	await runtimePlugin.onClose();
+});
+
+test("runtime plugin registers and removes Node-RED runtime log handler with logs signal", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
+	assert.ok(runtimePlugin);
+	assert.equal(nodeRedUtilStub.log.handlerCount(), 0);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			logsEnabled: true,
+			logsUrl: "http://localhost:4318/v1/logs",
+			tracesEnabled: false,
+			metricsEnabled: false,
+			logLevel: "off",
+		},
+	});
+	assert.equal(nodeRedUtilStub.log.handlerCount(), 1);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			logsEnabled: false,
+			logsUrl: "http://localhost:4318/v1/logs",
+			tracesEnabled: false,
+			metricsEnabled: false,
+			logLevel: "off",
+		},
+	});
+	assert.equal(nodeRedUtilStub.log.handlerCount(), 0);
+	await runtimePlugin.onClose();
+	assert.equal(nodeRedUtilStub.log.handlerCount(), 0);
+});
+
+test("runtime plugin forwards Node-RED runtime logs to OTel logger", async () => {
+	const { runtimePlugin } = createPluginHarness(false);
+	assert.ok(runtimePlugin);
+	await runtimePlugin.onSettings({
+		opentelemetry: {
+			logsEnabled: true,
+			logsUrl: "http://localhost:4318/v1/logs",
+			tracesEnabled: false,
+			metricsEnabled: false,
+			logLevel: "off",
+		},
+	});
+	const logger = getSharedState().logger;
+	assert.ok(logger);
+	const emitSpy = test.mock.method(logger, "emit");
+	nodeRedUtilStub.log.emit({
+		level: nodeRedUtilStub.log.ERROR,
+		msg: "Started flows",
+		type: "runtime",
+		id: "runtime-id",
+		name: "runtime-name",
+	});
+	assert.equal(emitSpy.mock.calls.length, 1);
+	assert.equal(emitSpy.mock.calls[0].arguments[0].body, "Started flows");
+	assert.equal(emitSpy.mock.calls[0].arguments[0].severityText, "ERROR");
+	assert.equal(
+		emitSpy.mock.calls[0].arguments[0].attributes["node_red.log.type"],
+		"runtime",
+	);
 	await runtimePlugin.onClose();
 });
 
