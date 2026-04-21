@@ -1361,6 +1361,7 @@ function resolveSpanKind(nodeType: string): SpanKind {
 			return SpanKind.CLIENT;
 		case "mqtt in":
 		case "amqp-in":
+		case "amqp-in-manual-ack":
 		case "websocket in":
 			return SpanKind.CONSUMER;
 		case "mqtt out":
