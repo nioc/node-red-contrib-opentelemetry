@@ -84,11 +84,15 @@ class MiniRed {
     this.handlers = new Map()
     this.queue = []
 
-    let registered
+    // hook labels are global to the runtime, and registering one twice throws
+    this.labelledHooks = new Set()
     const RED = {
       nodes: {
         createNode: (node) => {
-          node.status = () => {}
+          node.statuses = []
+          node.warnings = []
+          node.status = (status) => node.statuses.push(status)
+          node.warn = (warning) => node.warnings.push(warning)
           node.on = (event, callback) => {
             if (event === 'close') {
               this.closeHandler = callback.bind(node)
@@ -96,19 +100,44 @@ class MiniRed {
           }
         },
         registerType: (_type, constructor) => {
-          registered = constructor
+          this.constructNode = constructor
         },
       },
       hooks: {
         add: (name, handler) => {
-          this.hooks[name.split('.')[0]] = handler
+          const [id] = name.split('.')
+          if (this.labelledHooks.has(name)) {
+            throw new Error('Hook ' + name + ' already registered')
+          }
+          this.labelledHooks.add(name)
+          // eslint-disable-next-line security/detect-object-injection
+          this.hooks[id] = handler
         },
-        remove: () => {},
+        remove: (name) => {
+          const [id, label] = name.split('.')
+          for (const registered of [...this.labelledHooks]) {
+            const [registeredId, registeredLabel] = registered.split('.')
+            if (registeredLabel === label && (id === '*' || id === registeredId)) {
+              this.labelledHooks.delete(registered)
+            }
+          }
+        },
       },
     }
     require('../../lib/opentelemetry-node')(RED)
-    this.otelNode = {}
-    registered.call(this.otelNode, { ...DEFAULT_CONFIG, ...config })
+    this.otelNode = this.addOtelNode(config)
+  }
+
+  /**
+   * Add an OpenTelemetry node to the runtime, as placing one on a flow does
+   * @param {object} [config] Overrides of the OpenTelemetry node configuration
+   * @param {string} [id] Node identifier
+   * @returns {object} The node instance, carrying its `statuses` and `warnings`
+   */
+  addOtelNode (config = {}, id = 'otel-node-1') {
+    const node = { id }
+    this.constructNode.call(node, { ...DEFAULT_CONFIG, ...config })
+    return node
   }
 
   /**

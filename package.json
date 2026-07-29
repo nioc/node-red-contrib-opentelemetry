@@ -4,7 +4,7 @@
   "description": "Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for Node-RED",
   "scripts": {
     "lint": "eslint . --fix",
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test --test-force-exit \"test/**/*.test.js\""
   },
   "engines": {
     "node": ">=18.0.0"

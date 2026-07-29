@@ -224,3 +224,25 @@ test('a run abandoned by a node still exports its open spans', async () => {
   assert.equal(root.attributes['node_red.span.incomplete'], true)
   assert.equal(traceIdsOf(spans).size, 1)
 })
+
+test('a second OpenTelemetry node stays inactive instead of failing the deploy', async () => {
+  const red = new MiniRed()
+  // adding the node to another flow used to throw "Hook onSend.otel already registered",
+  // which fails the deploy of that flow
+  const second = red.addOtelNode({ rootPrefix: 'Clobbered ' }, 'otel-node-2')
+
+  assert.deepEqual(second.statuses.at(-1), { fill: 'grey', shape: 'ring', text: 'inactive, another OTEL node is active' })
+  assert.match(second.warnings.at(-1), /already handled by node "otel-node-1"/)
+
+  // the node that owns the hooks keeps tracing, with its own settings
+  const inject = red.node('n1', 'inject')
+  const change = red.node('n2', 'change')
+  red.wire(inject, [change])
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(traceIdsOf(spans).size, 1)
+  assert.equal(byName(spans, 'change').length, 1)
+  assert.equal(rootOf(spans).name, 'Message inject', 'the inactive node must not override the active settings')
+})
