@@ -3,7 +3,8 @@
   "version": "1.6.4",
   "description": "Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for Node-RED",
   "scripts": {
-    "lint": "eslint . --fix"
+    "lint": "eslint . --fix",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "engines": {
     "node": ">=18.0.0"

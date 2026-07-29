@@ -15,7 +15,12 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
 - based on [OpenTelemetry JavaScript framework](https://github.com/open-telemetry/opentelemetry-js) and [Node-RED messaging hooks](https://nodered.org/docs/api/hooks/messaging):
   - create spans on `onSend(source)` and `postDeliver(destination)` events,
   - end spans on `onComplete` and `postDeliver(source)` events.
+- **one trace per flow execution**: every node a message reaches is a span below a single run
+  span, whatever the message identifier changes along the way (see [Traces and runs](#traces-and-runs)),
+- continues the caller trace when the entry node receives a [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview)
+  (`http in` headers, `mqtt in` v5 user properties, `amqp-in` headers),
 - trace includes:
+  - run id,
   - message id,
   - flow id,
   - node id,
@@ -29,6 +34,31 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
 ![Example spans in JaegerUI](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_01.png "Example spans")
 
 ![Example spans to metrics in Grafana](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_02.png "Example spans to metrics")
+
+### Traces and runs
+
+A trace stands for one execution of your flow. The first node to emit a message opens a **run
+span**, every node the message reaches becomes a child span, and the run span ends when the last
+of those node spans ends.
+
+Node-RED gives a fresh `_msgid` to every message object a node emits (a `function` node
+returning `{payload: ...}` instead of the message it received, a `split` node, a `join` node,
+...). To keep those in the same trace, the run is carried on the message in the
+`otelRootMsgId` property, which you will therefore see on messages in the debug sidebar.
+
+Two situations deliberately produce more than one trace, following the
+[messaging semantic conventions](https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/):
+
+- a node that acknowledges a message and emits later (`delay`, `trigger`, a rate limiter) hands
+  over to a new run, linked to the one it came from with a span link
+  (`node_red.link.type: continuation`),
+- a message published to a broker and consumed by another flow is a run of its own, correlated
+  through the propagated trace context.
+
+Nodes that never report completion (`tcp in`, `server-events`, ...) get their span closed once
+the message they created has been dispatched. A run left unfinished past the configured
+`timeout` is closed by a sweep, and the node spans still open are ended and flagged with
+`node_red.span.incomplete` instead of being dropped.
 
 ### Metrics
 
@@ -82,7 +112,7 @@ As with every [node installation](https://nodered.org/docs/user-guide/runtime/ad
   - define an optional root span prefix (will be added in Node-RED root span name),
   - define nodes that should not send traces (using comma-separated list like `debug,catch`),
   - define nodes that should propagate [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview) (in http request headers, using comma-separated list like `http request,my-custom-node`),
-  - define time in seconds after which an unmodified message will be ended and deleted,
+  - define time in seconds after which a run with no activity is considered abandoned and closed,
   - define custom attributes you want to send (optionally).
 
 ### Metrics

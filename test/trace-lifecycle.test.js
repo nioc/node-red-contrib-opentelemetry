@@ -1,0 +1,226 @@
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const { MiniRed, sleep } = require('./helpers/mini-red')
+
+/** ReadableSpan exposes the parent as `parentSpanId` (SDK 1.x) or `parentSpanContext` (2.x) */
+function parentSpanIdOf (span) {
+  return span.parentSpanId ?? span.parentSpanContext?.spanId
+}
+
+function traceIdsOf (spans) {
+  return new Set(spans.map((span) => span.spanContext().traceId))
+}
+
+function byName (spans, name) {
+  return spans.filter((span) => span.name === name)
+}
+
+/**
+ * The span standing for the whole flow execution. It is identified by `node_red.msg.new`
+ * rather than by the absence of a parent, since it is a child of the caller span whenever the
+ * entry node received a trace context from outside Node-RED.
+ */
+function runSpansOf (spans) {
+  return spans.filter((span) => span.attributes['node_red.msg.new'] === true)
+}
+
+function rootOf (spans) {
+  const roots = runSpansOf(spans)
+  assert.equal(roots.length, 1, `expected exactly one run span, got ${roots.map((s) => s.name).join(', ')}`)
+  return roots[0]
+}
+
+test('a message forwarded unchanged produces a single trace', async () => {
+  const red = new MiniRed()
+  const inject = red.node('n1', 'inject')
+  const change = red.node('n2', 'change')
+  const debug = red.node('n3', 'debug')
+  red.wire(inject, [change])
+  red.wire(change, [debug])
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(traceIdsOf(spans).size, 1)
+  const root = rootOf(spans)
+  assert.equal(root.name, 'Message inject')
+  assert.equal(parentSpanIdOf(root), undefined, 'with no incoming context the run span is a trace root')
+  // debug is in the ignored types, so it gets no span
+  assert.deepEqual(spans.map((span) => span.name).sort(), ['Message inject', 'change', 'inject'])
+  for (const span of spans.filter((span) => span !== root)) {
+    assert.equal(parentSpanIdOf(span), root.spanContext().spanId)
+    assert.equal(span.attributes['node_red.run.id'], root.attributes['node_red.run.id'])
+  }
+})
+
+test('a node emitting a brand new message stays in the same trace', async () => {
+  const red = new MiniRed()
+  const inject = red.node('n1', 'inject')
+  const fn = red.node('n2', 'function')
+  const change = red.node('n3', 'change')
+  const debug = red.node('n4', 'debug')
+  red.wire(inject, [fn])
+  red.wire(fn, [change])
+  red.wire(change, [debug])
+  // returning a new object instead of the received message: Node-RED mints a fresh _msgid,
+  // which used to start a second, unrelated trace
+  red.on(fn, (msg, send, done) => {
+    send({ payload: 'rebuilt' })
+    done()
+  })
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(traceIdsOf(spans).size, 1, 'the whole execution must be one trace')
+  const root = rootOf(spans)
+  assert.equal(byName(spans, 'function').length, 1, 'the function node must get exactly one span')
+  const changeSpan = byName(spans, 'change')[0]
+  assert.equal(parentSpanIdOf(changeSpan), root.spanContext().spanId)
+  // the downstream span carries its own message id, and the run id of the whole execution
+  assert.notEqual(changeSpan.attributes['node_red.msg.id'], root.attributes['node_red.msg.id'])
+  assert.equal(changeSpan.attributes['node_red.run.id'], root.attributes['node_red.run.id'])
+})
+
+test('split parts stay in the trace of the message they came from', async () => {
+  const red = new MiniRed()
+  const inject = red.node('n1', 'inject')
+  const split = red.node('n2', 'split')
+  const change = red.node('n3', 'change')
+  const debug = red.node('n4', 'debug')
+  red.wire(inject, [split])
+  red.wire(split, [change])
+  red.wire(change, [debug])
+  red.on(split, (msg, send, done) => {
+    for (const part of ['a', 'b', 'c']) {
+      send({ payload: part })
+    }
+    done()
+  })
+
+  red.send(inject, { payload: ['a', 'b', 'c'] })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(traceIdsOf(spans).size, 1)
+  assert.equal(byName(spans, 'split').length, 1, 'the split node must get one span, not one per part')
+  assert.equal(byName(spans, 'change').length, 3, 'each part must get its own downstream span')
+  const root = rootOf(spans)
+  for (const span of byName(spans, 'change')) {
+    assert.equal(parentSpanIdOf(span), root.spanContext().spanId)
+  }
+})
+
+test('an incoming trace context is continued instead of starting a new trace', async () => {
+  const red = new MiniRed()
+  const callerTraceId = '0af7651916cd43dd8448eb211c80319c'
+  const callerSpanId = 'b7ad6b7169203331'
+  const httpIn = red.node('n1', 'http in', { url: '/test', method: 'get' })
+  const fn = red.node('n2', 'function')
+  const httpResponse = red.node('n3', 'http response')
+  red.wire(httpIn, [fn])
+  red.wire(fn, [httpResponse])
+  red.on(httpResponse, (msg, send, done) => done())
+
+  red.send(httpIn, {
+    payload: '',
+    req: { ip: '127.0.0.1', headers: { traceparent: `00-${callerTraceId}-${callerSpanId}-01`, 'user-agent': 'test' } },
+    res: { _res: { statusCode: 200 } },
+  })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(traceIdsOf(spans).size, 1)
+  const root = rootOf(spans)
+  assert.equal(root.spanContext().traceId, callerTraceId, 'the run must join the caller trace')
+  assert.equal(parentSpanIdOf(root), callerSpanId, 'the run must be a child of the caller span')
+  assert.equal(root.name, 'Message http in /test')
+  assert.equal(root.attributes['http.response.status_code'], 200)
+  // the "http in" span is closed by the "http response" node, and must be exported
+  assert.equal(byName(spans, 'http in').length, 1)
+  assert.equal(byName(spans, 'http response').length, 1)
+})
+
+test('a node that emits without receiving gets its span exported', async () => {
+  const red = new MiniRed()
+  // tcp in never receives a message and never reports completion (issue #15)
+  const tcpIn = red.node('n1', 'tcp in')
+  const debug = red.node('n2', 'debug')
+  red.wire(tcpIn, [debug])
+
+  red.send(tcpIn, { payload: 'from the socket' })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(byName(spans, 'tcp in').length, 1, 'the entry span must not be dropped')
+  const root = rootOf(spans)
+  assert.equal(root.name, 'Message tcp in')
+  assert.equal(traceIdsOf(spans).size, 1)
+})
+
+test('an error marks both the node span and the run as failed', async () => {
+  const red = new MiniRed()
+  const inject = red.node('n1', 'inject')
+  const fn = red.node('n2', 'function')
+  red.wire(inject, [fn])
+  red.on(fn, (msg, send, done) => done('boom'))
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(traceIdsOf(spans).size, 1)
+  const fnSpan = byName(spans, 'function')[0]
+  assert.equal(fnSpan.status.code, 2, 'node span must be ERROR')
+  assert.equal(rootOf(spans).status.code, 2, 'run span must be ERROR')
+})
+
+test('a message emitted after the run finished starts a linked trace', async () => {
+  const red = new MiniRed()
+  const inject = red.node('n1', 'inject')
+  // a node that acknowledges the message and emits later, decoupling input from output
+  const delay = red.node('n2', 'delay')
+  const change = red.node('n3', 'change')
+  red.wire(inject, [delay])
+  red.wire(delay, [change])
+  red.on(delay, (msg, send, done) => done())
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  // the queued message is released once the first run is already over
+  red.send(delay, { payload: 'released' })
+  red.run()
+  const spans = await red.stop()
+
+  const traceIds = traceIdsOf(spans)
+  assert.equal(traceIds.size, 2, 'an asynchronous hand-off is a separate trace')
+  const roots = runSpansOf(spans)
+  assert.equal(roots.length, 2)
+  const [firstRoot, secondRoot] = roots
+  assert.equal(secondRoot.links.length, 1, 'the continuation must be linked to the run it came from')
+  assert.equal(secondRoot.links[0].context.spanId, firstRoot.spanContext().spanId)
+  assert.equal(secondRoot.links[0].attributes['node_red.link.type'], 'continuation')
+})
+
+test('a run abandoned by a node still exports its open spans', async () => {
+  // timeout is deliberately short; the sweep runs every 5s
+  const red = new MiniRed({ timeout: 0.05 })
+  const inject = red.node('n1', 'inject')
+  const stuck = red.node('n2', 'function', { name: 'never completes' })
+  red.wire(inject, [stuck])
+  red.on(stuck, () => { /* neither sends nor reports completion */ })
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  await sleep(5300)
+  const spans = await red.stop()
+
+  const stuckSpan = byName(spans, 'never completes')[0]
+  assert.ok(stuckSpan, 'the unfinished span must be exported instead of dropped')
+  assert.equal(stuckSpan.attributes['node_red.span.incomplete'], true)
+  const root = rootOf(spans)
+  assert.equal(root.attributes['node_red.span.incomplete'], true)
+  assert.equal(traceIdsOf(spans).size, 1)
+})

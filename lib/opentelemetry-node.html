@@ -189,7 +189,7 @@ RED.nodes.registerType('OpenTelemetry', {
     <label for="node-input-propagateHeadersTypes"><i class="fa fa-suitcase"></i> Propagate</label>
     <input type="text" id="node-input-propagateHeadersTypes" placeholder="mycustomnode,othernode">
   </div>
-  <div class="form-row" title="Time in seconds after which an unmodified message will be ended and deleted">
+  <div class="form-row" title="Time in seconds after which a run with no activity is considered abandoned and closed">
     <label for="node-input-timeout"><i class="fa fa-hourglass"></i> Timeout</label>
     <input type="number" id="node-input-timeout" placeholder="10">
   </div>
@@ -209,7 +209,9 @@ RED.nodes.registerType('OpenTelemetry', {
 <script type="text/html" data-help-name="OpenTelemetry">
   <p>Send Node-RED traces to OpenTelemetry collector (like Jaeger or Zipkin).</p>
   <h3>Details</h3>
-  <p>With this node enabled, each message will generate a trace composed of the traces (spans) of each node traversed.</p>
+  <p>With this node enabled, each execution of a flow will generate a trace composed of the traces (spans) of each node traversed.</p>
+  <p>The node that starts an execution opens the run span, every node the message reaches is a span below it, and the run span ends once the last of them ends. Messages created along the way (by a <code>function</code>, <code>split</code> or <code>join</code> node for example) stay in the same trace: the run is carried in the <code>otelRootMsgId</code> message property. When the entry node receives a trace context from outside Node-RED, the run continues the caller trace instead of starting a new one.</p>
+  <p>A node that acknowledges a message and emits it later (<code>delay</code>, <code>trigger</code>, ...) hands over to a new trace, linked to the one it came from.</p>
   <p>You must set:<ul>
     <li>the <code>url</code> of the exporter,</li>
     <li>the <code>service</code> name displayed in your visualization tool,</li>

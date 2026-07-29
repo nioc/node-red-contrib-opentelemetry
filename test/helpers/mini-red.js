@@ -1,0 +1,240 @@
+/**
+ * A minimal stand-in for the Node-RED runtime, reproducing the hook sequence of a real
+ * message delivery:
+ *
+ *   onSend -> (clone) -> preDeliver -> postDeliver -> [next tick] onReceive -> handler -> postReceive
+ *
+ * with `onComplete` triggered by the node calling `done()`. `postDeliver` firing before
+ * `onReceive`, and `onComplete` carrying the message the node *received*, both matter to the
+ * span lifecycle, so they are reproduced exactly (see Flow.js `handlePreDeliver` and
+ * Node.js `_emitInput` / `_complete` in node-red).
+ */
+
+const { ExportResultCode } = require('@opentelemetry/core')
+
+/** Spans handed to the exporter, reset by each `startRuntime` call */
+const exportedSpans = []
+
+class CollectingExporter {
+  export (spans, resultCallback) {
+    exportedSpans.push(...spans)
+    resultCallback({ code: ExportResultCode.SUCCESS })
+  }
+
+  shutdown () {
+    return Promise.resolve()
+  }
+
+  forceFlush () {
+    return Promise.resolve()
+  }
+}
+
+// The node requires its exporter lazily, so pre-seeding the module cache is enough to keep
+// spans in memory. The exported bindings are getters, so assigning on the real module object
+// would silently do nothing (and the spans would be sent to a real collector).
+for (const exporterModule of ['@opentelemetry/exporter-trace-otlp-http', '@opentelemetry/exporter-trace-otlp-proto']) {
+  const filename = require.resolve(exporterModule)
+  // eslint-disable-next-line security/detect-object-injection
+  require.cache[filename] = {
+    id: filename,
+    filename,
+    loaded: true,
+    exports: { OTLPTraceExporter: CollectingExporter },
+  }
+}
+
+const DEFAULT_CONFIG = {
+  // never reached: the exporter above is in-memory, the URL only has to be non-empty
+  url: 'http://127.0.0.1:1/v1/traces',
+  protocol: 'http',
+  serviceName: 'test',
+  rootPrefix: 'Message ',
+  ignoredTypes: 'debug,catch',
+  propagateHeadersTypes: '',
+  isLogging: false,
+  timeout: 10,
+  attributeMappings: [],
+}
+
+let messageCounter = 0
+
+function nextMsgId () {
+  return `msgid-${++messageCounter}`
+}
+
+/** Node-RED clones a message before delivering it to more than one destination */
+function cloneMessage (msg) {
+  const clone = { ...msg }
+  if (msg.headers) {
+    clone.headers = { ...msg.headers }
+  }
+  return clone
+}
+
+class MiniRed {
+  /**
+   * @param {object} [config] Overrides of the OpenTelemetry node configuration
+   */
+  constructor (config = {}) {
+    exportedSpans.length = 0
+    this.hooks = {}
+    this.nodes = new Map()
+    this.wires = new Map()
+    this.handlers = new Map()
+    this.queue = []
+
+    let registered
+    const RED = {
+      nodes: {
+        createNode: (node) => {
+          node.status = () => {}
+          node.on = (event, callback) => {
+            if (event === 'close') {
+              this.closeHandler = callback.bind(node)
+            }
+          }
+        },
+        registerType: (_type, constructor) => {
+          registered = constructor
+        },
+      },
+      hooks: {
+        add: (name, handler) => {
+          this.hooks[name.split('.')[0]] = handler
+        },
+        remove: () => {},
+      },
+    }
+    require('../../lib/opentelemetry-node')(RED)
+    this.otelNode = {}
+    registered.call(this.otelNode, { ...DEFAULT_CONFIG, ...config })
+  }
+
+  /**
+   * Declare a node
+   * @param {string} id Node identifier
+   * @param {string} type Node type
+   * @param {object} [definition] Extra definition properties (name, url, method, ...)
+   * @returns {object} The node definition
+   */
+  node (id, type, definition = {}) {
+    const node = { id, type, z: 'flow-1', name: '', _flow: { flow: { label: 'Test flow' } }, ...definition }
+    this.nodes.set(id, node)
+    return node
+  }
+
+  /**
+   * Wire a node to its destinations
+   * @param {object} source Source node definition
+   * @param {object[]} destinations Destination node definitions
+   */
+  wire (source, destinations) {
+    this.wires.set(source.id, destinations)
+  }
+
+  /**
+   * Register what a node does when it receives a message. The default forwards the message
+   * unchanged and reports completion, like most core nodes.
+   * @param {object} node Node definition
+   * @param {(msg: any, send: (msg: any) => void, done: (error?: any) => void) => void} handler
+   */
+  on (node, handler) {
+    this.handlers.set(node.id, handler)
+  }
+
+  /**
+   * Emit a message from a node, as `node.send()` does
+   * @param {object} source Source node definition
+   * @param {any} msg Message to emit (a fresh `_msgid` is minted when it has none, as
+   *   Node-RED's `Node.prototype.send` does)
+   */
+  send (source, msg) {
+    if (!msg._msgid) {
+      msg._msgid = nextMsgId()
+    }
+    const destinations = this.wires.get(source.id) ?? []
+    if (destinations.length === 0) {
+      return
+    }
+    const sendEvents = destinations.map((destination) => ({
+      msg,
+      source: { id: source.id, node: source, port: 0 },
+      destination: { id: destination.id, node: destination },
+    }))
+    this.hooks.onSend(sendEvents)
+    let alreadySent = false
+    for (const sendEvent of sendEvents) {
+      // preRoute clones the message for every destination after the first
+      if (alreadySent) {
+        sendEvent.msg = cloneMessage(sendEvent.msg)
+      }
+      alreadySent = true
+      this.hooks.preDeliver(sendEvent)
+      // delivery is asynchronous by default, postDeliver fires straight after preDeliver
+      this.queue.push(sendEvent)
+      this.hooks.postDeliver(sendEvent)
+    }
+  }
+
+  /** Deliver every queued message, running the receiving nodes until the flow settles */
+  run () {
+    let guard = 0
+    while (this.queue.length > 0) {
+      if (++guard > 10000) {
+        throw new Error('flow did not settle')
+      }
+      const sendEvent = this.queue.shift()
+      this.deliver(sendEvent.destination.node, sendEvent.msg)
+    }
+  }
+
+  /**
+   * Hand a message to a node, as `Node.prototype.receive` does
+   * @param {object} node Node definition
+   * @param {any} msg Message data
+   */
+  deliver (node, msg) {
+    if (!msg._msgid) {
+      msg._msgid = nextMsgId()
+    }
+    const receiveEvent = { msg, destination: { id: node.id, node } }
+    this.hooks.onReceive(receiveEvent)
+    const handler = this.handlers.get(node.id) ?? ((received, send, done) => {
+      send(received)
+      done()
+    })
+    handler(
+      msg,
+      (emitted) => this.send(node, emitted),
+      (error) => this.complete(node, msg, error),
+    )
+    this.hooks.postReceive(receiveEvent)
+  }
+
+  /**
+   * Report completion for a message, as `Node.prototype._complete` does
+   * @param {object} node Node definition
+   * @param {any} msg The message the node received
+   * @param {any} [error] Error encountered
+   */
+  complete (node, msg, error) {
+    this.hooks.onComplete({ msg, error, node: { id: node.id, node } })
+  }
+
+  /**
+   * Shut the node down, which flushes the span processor, and return the exported spans
+   * @returns {Promise<import('@opentelemetry/sdk-trace-base').ReadableSpan[]>}
+   */
+  async stop () {
+    await this.closeHandler()
+    return exportedSpans.slice()
+  }
+}
+
+/** @param {number} ms */
+function sleep (ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+module.exports = { MiniRed, sleep, nextMsgId }
