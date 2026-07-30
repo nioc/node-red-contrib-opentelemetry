@@ -178,7 +178,9 @@ RED.nodes.registerType('OpenTelemetry', {
       sortable: false,
       removable: true,
     })
-    this.headers
+    // a node saved before this field existed has no headers at all: the editor only fills
+    // defaults in on import, not when loading the flows it already has
+    ;(this.headers ?? [])
       .forEach((header) => {
         $('#node-input-otelHeader-container').editableList('addItem', { header })
       })
@@ -222,8 +224,8 @@ RED.nodes.registerType('OpenTelemetry', {
       sortable: false,
       removable: true,
     })
-    // sort and display attributes
-    this.attributeMappings
+    // sort and display attributes, tolerating a node saved before the field existed
+    ;(this.attributeMappings ?? [])
       .sort(sortAttributeMappings)
       .forEach((attributeMapping) => {
         $('#node-input-otelAttributeMapping-container').editableList('addItem', { attributeMapping })
