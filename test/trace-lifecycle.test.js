@@ -246,3 +246,70 @@ test('a second OpenTelemetry node stays inactive instead of failing the deploy',
   assert.equal(byName(spans, 'change').length, 1)
   assert.equal(rootOf(spans).name, 'Message inject', 'the inactive node must not override the active settings')
 })
+
+test('a session looping over two messages is one trace with a span per iteration', async () => {
+  const red = new MiniRed()
+  const inject = red.node('n1', 'inject', { name: 'start session' })
+  const start = red.node('n2', 'function', { name: 'start session' })
+  const split = red.node('n3', 'split', { name: '2 messages' })
+  const work = red.node('n4', 'function', { name: 'process attempt' })
+  const more = red.node('n5', 'switch', { name: 'more attempts?' })
+  const join = red.node('n6', 'join', { name: 'session results' })
+  const debug = red.node('n7', 'debug', { name: 'session done' })
+  red.wire(inject, [start])
+  red.wire(start, [split])
+  red.wire(split, [work])
+  red.wire(work, [more])
+  // two output ports: back to the worker, or on to the join
+  red.wire(more, [[work], [join]])
+  red.wire(join, [debug])
+
+  // a brand new object, so Node-RED mints a fresh _msgid for the session
+  red.on(start, (msg, send, done) => {
+    send({ sessionId: 'S-test', payload: [{ item: 'alpha' }, { item: 'beta' }] })
+    done()
+  })
+  red.on(split, (msg, send, done) => {
+    for (const item of msg.payload) {
+      send({ sessionId: msg.sessionId, payload: item })
+    }
+    done()
+  })
+  red.on(work, (msg, send, done) => {
+    const item = msg.payload.item
+    msg.attempts = (msg.attempts || 0) + 1
+    msg.payload = { session: msg.sessionId, item, attempt: msg.attempts }
+    send(msg)
+    done()
+  })
+  red.on(more, (msg, send, done) => {
+    // attempts < 3 loops back on port 0, otherwise leaves on port 1
+    send(msg.attempts < 3 ? [msg, null] : [null, msg])
+    done()
+  })
+  const collected = []
+  red.on(join, (msg, send, done) => {
+    collected.push(msg)
+    if (collected.length === 2) {
+      send({ sessionId: msg.payload.session, payload: collected.map((m) => m.payload) })
+    }
+    done()
+  })
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(traceIdsOf(spans).size, 1, 'the whole session must be one trace')
+  const root = rootOf(spans)
+  assert.equal(byName(spans, 'process attempt').length, 6, '2 messages x 3 attempts, one span each')
+  assert.equal(byName(spans, 'more attempts?').length, 6, 'the switch node is entered once per iteration')
+  assert.equal(byName(spans, '2 messages').length, 1)
+  assert.equal(byName(spans, 'session results').length, 2, 'one span per message reaching the join')
+  for (const span of spans.filter((span) => span !== root)) {
+    assert.equal(parentSpanIdOf(span), root.spanContext().spanId)
+    assert.equal(span.attributes['node_red.run.id'], root.attributes['node_red.run.id'])
+  }
+  // nothing may be left flagged as unfinished
+  assert.equal(spans.filter((span) => span.attributes['node_red.span.incomplete']).length, 0)
+})

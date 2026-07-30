@@ -156,7 +156,8 @@ class MiniRed {
   /**
    * Wire a node to its destinations
    * @param {object} source Source node definition
-   * @param {object[]} destinations Destination node definitions
+   * @param {object[]|object[][]} destinations Destination node definitions for the single
+   *   output, or one array of destinations per output port
    */
   wire (source, destinations) {
     this.wires.set(source.id, destinations)
@@ -175,30 +176,45 @@ class MiniRed {
   /**
    * Emit a message from a node, as `node.send()` does
    * @param {object} source Source node definition
-   * @param {any} msg Message to emit (a fresh `_msgid` is minted when it has none, as
-   *   Node-RED's `Node.prototype.send` does)
+   * @param {any|any[]} msgOrArray Message to emit, or one message per output port with
+   *   `null` for the ports that emit nothing. A fresh `_msgid` is minted for any message
+   *   that has none, as Node-RED's `Node.prototype.send` does.
    */
-  send (source, msg) {
-    if (!msg._msgid) {
-      msg._msgid = nextMsgId()
-    }
-    const destinations = this.wires.get(source.id) ?? []
-    if (destinations.length === 0) {
+  send (source, msgOrArray) {
+    const perPort = Array.isArray(msgOrArray) ? msgOrArray : [msgOrArray]
+    const wires = this.wires.get(source.id) ?? []
+    const ports = Array.isArray(wires[0]) ? wires : [wires]
+
+    // Node-RED passes every message of a single `send` call to `onSend` at once
+    const sendEvents = []
+    perPort.forEach((msg, port) => {
+      if (msg === null || msg === undefined) {
+        return
+      }
+      if (!msg._msgid) {
+        msg._msgid = nextMsgId()
+      }
+      for (const destination of ports[port] ?? []) {
+        sendEvents.push({
+          msg,
+          source: { id: source.id, node: source, port },
+          destination: { id: destination.id, node: destination },
+        })
+      }
+    })
+    if (sendEvents.length === 0) {
       return
     }
-    const sendEvents = destinations.map((destination) => ({
-      msg,
-      source: { id: source.id, node: source, port: 0 },
-      destination: { id: destination.id, node: destination },
-    }))
     this.hooks.onSend(sendEvents)
-    let alreadySent = false
+
+    const dispatched = new Set()
     for (const sendEvent of sendEvents) {
-      // preRoute clones the message for every destination after the first
-      if (alreadySent) {
+      // preRoute clones a message that is being delivered more than once
+      if (dispatched.has(sendEvent.msg)) {
         sendEvent.msg = cloneMessage(sendEvent.msg)
+      } else {
+        dispatched.add(sendEvent.msg)
       }
-      alreadySent = true
       this.hooks.preDeliver(sendEvent)
       // delivery is asynchronous by default, postDeliver fires straight after preDeliver
       this.queue.push(sendEvent)
