@@ -194,6 +194,7 @@ class MiniRed {
       if (!msg._msgid) {
         msg._msgid = nextMsgId()
       }
+      // eslint-disable-next-line security/detect-object-injection
       for (const destination of ports[port] ?? []) {
         sendEvents.push({
           msg,
