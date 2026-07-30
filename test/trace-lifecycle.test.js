@@ -403,3 +403,131 @@ test('a session where one message is retried and another gives up is still one t
     assert.equal(parentSpanIdOf(span), root.spanContext().spanId)
   }
 })
+
+test('custom attributes are evaluated per loop iteration', async () => {
+  const red = new MiniRed({
+    attributeMappings: [
+      // the file being worked on is set before the loop, so it is there at span start
+      { isAfter: false, flow: '', nodeType: 'function', key: 'node_red.file.name', path: 'filename' },
+      // the attempt number is set by the node itself, so only the end of the span sees it
+      { isAfter: true, flow: '', nodeType: 'function', key: 'node_red.attempt', path: 'attempts' },
+      // the same value read at span start instead, to pin down what that gives
+      { isAfter: false, flow: '', nodeType: 'function', key: 'node_red.attempt.at.start', path: 'attempts' },
+    ],
+  })
+  const inject = red.node('n1', 'inject')
+  const work = red.node('n2', 'function', { name: 'process attempt' })
+  const outcome = red.node('n3', 'switch', { name: 'outcome?' })
+  const done = red.node('n4', 'debug')
+  red.wire(inject, [work])
+  red.wire(work, [outcome])
+  red.wire(outcome, [[work], [done]])
+
+  red.on(work, (msg, send, cb) => {
+    msg.attempts = (msg.attempts || 0) + 1
+    msg.outcome = msg.attempts < 3 ? 'retry' : 'ok'
+    send(msg)
+    cb()
+  })
+  red.on(outcome, (msg, send, cb) => {
+    send(msg.outcome === 'retry' ? [msg, null] : [null, msg])
+    cb()
+  })
+
+  // the filename arrives with the message, as a split node would hand it over
+  red.send(inject, { payload: 1, filename: 'orders-2026-07-30.csv' })
+  red.run()
+  const spans = await red.stop()
+
+  const attempts = byName(spans, 'process attempt')
+  assert.equal(attempts.length, 3, 'one span per iteration')
+
+  // an attribute set before the loop is on every iteration
+  for (const span of attempts) {
+    assert.equal(span.attributes['node_red.file.name'], 'orders-2026-07-30.csv')
+  }
+  // read at the end of the span, the attempt number is that of the iteration
+  assert.deepEqual(attempts.map((span) => span.attributes['node_red.attempt']), [1, 2, 3])
+  // read at the start it is whatever the previous iteration left behind, hence off by one:
+  // the first has no value at all, since the node had not counted anything yet
+  assert.deepEqual(attempts.map((span) => span.attributes['node_red.attempt.at.start']), [undefined, 1, 2])
+})
+
+test('the documented attribute mappings carry per attempt values through a retry loop', async () => {
+  // exactly the rows the example flow documents
+  const red = new MiniRed({
+    attributeMappings: [
+      { isAfter: false, flow: '', nodeType: 'function', key: 'node_red.file.name', path: 'payload.filename' },
+      { isAfter: true, flow: '', nodeType: 'function', key: 'node_red.attempt', path: 'attempts' },
+      { isAfter: true, flow: '', nodeType: 'function', key: 'node_red.outcome', path: 'outcome' },
+      { isAfter: true, flow: '', nodeType: 'function', key: 'node_red.error.reason', path: 'lastError' },
+      // Start, not End: a switch span is closed on dispatch rather than on completion, so End
+      // mappings never reach it
+      { isAfter: false, flow: '', nodeType: '', key: 'node_red.session.id', path: 'sessionId' },
+      { isAfter: true, flow: '', nodeType: '', key: 'node_red.session.at.end', path: 'sessionId' },
+    ],
+  })
+  const inject = red.node('n1', 'inject')
+  const split = red.node('n2', 'split', { name: 'fan out items' })
+  const work = red.node('n3', 'function', { name: 'process attempt' })
+  const outcome = red.node('n4', 'switch', { name: 'outcome?' })
+  const done = red.node('n5', 'debug')
+  red.wire(inject, [split])
+  red.wire(split, [work])
+  red.wire(work, [outcome])
+  red.wire(outcome, [[work], [done]])
+
+  red.on(split, (msg, send, cb) => {
+    send({ sessionId: 'S-test', payload: { filename: 'orders-2026-07-30.csv' } })
+    cb()
+  })
+  // as the flow's worker does: fail twice, then succeed on the third attempt
+  red.on(work, (msg, send, cb) => {
+    const source = msg.payload
+    const filename = source.filename
+    msg.attempts = (msg.attempts || 0) + 1
+    const progress = { session: msg.sessionId, filename, attempt: msg.attempts }
+    if (msg.attempts >= 3) {
+      msg.outcome = 'ok'
+      delete msg.lastError
+      msg.payload = { ...progress, outcome: 'ok' }
+    } else {
+      msg.outcome = 'retry'
+      msg.lastError = `${filename} failed on attempt ${msg.attempts}`
+      msg.payload = { ...progress, outcome: 'retry' }
+    }
+    send(msg)
+    cb()
+  })
+  red.on(outcome, (msg, send, cb) => {
+    send(msg.outcome === 'retry' ? [msg, null] : [null, msg])
+    cb()
+  })
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  const attempts = byName(spans, 'process attempt')
+  assert.equal(attempts.length, 3)
+  // the filename survives every iteration, because the worker keeps it in the payload
+  assert.deepEqual(attempts.map((s) => s.attributes['node_red.file.name']),
+    ['orders-2026-07-30.csv', 'orders-2026-07-30.csv', 'orders-2026-07-30.csv'])
+  assert.deepEqual(attempts.map((s) => s.attributes['node_red.attempt']), [1, 2, 3])
+  assert.deepEqual(attempts.map((s) => s.attributes['node_red.outcome']), ['retry', 'retry', 'ok'])
+  // the reason is only there for the attempts that failed
+  assert.deepEqual(attempts.map((s) => s.attributes['node_red.error.reason']), [
+    'orders-2026-07-30.csv failed on attempt 1',
+    'orders-2026-07-30.csv failed on attempt 2',
+    undefined,
+  ])
+  // a mapping without a node type reaches every traced node
+  assert.deepEqual(attempts.map((s) => s.attributes['node_red.session.id']), ['S-test', 'S-test', 'S-test'])
+  assert.equal(byName(spans, 'outcome?')[0].attributes['node_red.session.id'], 'S-test')
+  // the switch span is closed when the message is dispatched rather than on completion, so an
+  // End mapping does not reach it, while it does reach a node that reports completion
+  assert.equal(byName(spans, 'outcome?')[0].attributes['node_red.session.at.end'], undefined)
+  assert.equal(attempts[0].attributes['node_red.session.at.end'], 'S-test')
+  // but never the run span: mappings only land on the node spans below it
+  assert.equal(rootOf(spans).attributes['node_red.session.id'], undefined)
+})
