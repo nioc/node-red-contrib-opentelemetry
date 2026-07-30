@@ -313,3 +313,93 @@ test('a session looping over two messages is one trace with a span per iteration
   // nothing may be left flagged as unfinished
   assert.equal(spans.filter((span) => span.attributes['node_red.span.incomplete']).length, 0)
 })
+
+test('a thrown error keeps its message on the span and marks the run', async () => {
+  const red = new MiniRed()
+  const inject = red.node('n1', 'inject')
+  const work = red.node('n2', 'function', { name: 'process attempt' })
+  red.wire(inject, [work])
+  red.on(work, () => {
+    throw new Error('still failing after 3 attempts')
+  })
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(traceIdsOf(spans).size, 1)
+  const workSpan = byName(spans, 'process attempt')[0]
+  assert.equal(workSpan.status.code, 2)
+  // the SDK drops a status message that is not a string, so an Error must be unwrapped
+  assert.equal(workSpan.status.message, 'still failing after 3 attempts')
+  assert.equal(workSpan.events.at(-1)?.name, 'exception')
+  assert.equal(rootOf(spans).status.code, 2, 'the run must be marked failed')
+})
+
+test('a session where one message is retried and another gives up is still one trace', async () => {
+  const red = new MiniRed()
+  const inject = red.node('n1', 'inject')
+  const start = red.node('n2', 'function', { name: 'build session' })
+  const split = red.node('n3', 'split', { name: 'fan out items' })
+  const work = red.node('n4', 'function', { name: 'process attempt' })
+  const outcome = red.node('n5', 'switch', { name: 'outcome?' })
+  const done = red.node('n6', 'debug', { name: 'item done' })
+  red.wire(inject, [start])
+  red.wire(start, [split])
+  red.wire(split, [work])
+  red.wire(work, [outcome])
+  red.wire(outcome, [[work], [done]])
+
+  red.on(start, (msg, send, cb) => {
+    send({ sessionId: 'S-test', payload: [{ item: 'alpha' }, { item: 'beta' }] })
+    cb()
+  })
+  red.on(split, (msg, send, cb) => {
+    for (const item of msg.payload) {
+      send({ sessionId: msg.sessionId, payload: item })
+    }
+    cb()
+  })
+  // scripted instead of random: alpha fails once then succeeds, beta never succeeds
+  const MAX_ATTEMPTS = 3
+  red.on(work, (msg, send, cb) => {
+    const item = msg.payload.item
+    msg.attempts = (msg.attempts || 0) + 1
+    const succeeds = item === 'alpha' && msg.attempts === 2
+    if (succeeds) {
+      msg.outcome = 'ok'
+      msg.payload = { item, attempt: msg.attempts }
+      send(msg)
+      return cb()
+    }
+    if (msg.attempts >= MAX_ATTEMPTS) {
+      throw new Error(`${item} still failing after ${msg.attempts} attempts`)
+    }
+    msg.outcome = 'retry'
+    msg.payload = { item, attempt: msg.attempts }
+    send(msg)
+    cb()
+  })
+  red.on(outcome, (msg, send, cb) => {
+    send(msg.outcome === 'retry' ? [msg, null] : [null, msg])
+    cb()
+  })
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(traceIdsOf(spans).size, 1, 'a partly failed session is still one trace')
+  const root = rootOf(spans)
+  // alpha: 2 attempts then ok. beta: 3 attempts, the last one throws
+  assert.equal(byName(spans, 'process attempt').length, 5)
+  const failed = byName(spans, 'process attempt').filter((span) => span.status.code === 2)
+  assert.equal(failed.length, 1, 'only the attempt that gave up is an error')
+  assert.match(failed[0].status.message, /beta still failing after 3 attempts/)
+  assert.equal(root.status.code, 2, 'one failed message fails the run')
+  // the successful message must not be left hanging by the failure of the other
+  assert.equal(spans.filter((span) => span.attributes['node_red.span.incomplete']).length, 0)
+  for (const span of spans.filter((span) => span !== root)) {
+    assert.equal(parentSpanIdOf(span), root.spanContext().spanId)
+  }
+})

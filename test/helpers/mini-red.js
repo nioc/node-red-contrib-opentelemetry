@@ -250,11 +250,17 @@ class MiniRed {
       send(received)
       done()
     })
-    handler(
-      msg,
-      (emitted) => this.send(node, emitted),
-      (error) => this.complete(node, msg, error),
-    )
+    try {
+      handler(
+        msg,
+        (emitted) => this.send(node, emitted),
+        (error) => this.complete(node, msg, error),
+      )
+    } catch (error) {
+      // a function node that throws is reported as `done(err)`, which is what puts the error on
+      // the span. `node.error()` alone would only route to a catch node (not modelled here).
+      this.complete(node, msg, error)
+    }
     this.hooks.postReceive(receiveEvent)
   }
 
