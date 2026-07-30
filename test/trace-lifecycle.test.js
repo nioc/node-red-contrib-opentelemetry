@@ -457,7 +457,10 @@ test('the documented attribute mappings carry per attempt values through a retry
   // exactly the rows the example flow documents
   const red = new MiniRed({
     attributeMappings: [
-      { isAfter: false, flow: '', nodeType: 'function', key: 'node_red.file.name', path: 'payload.filename' },
+      // a plain top level property, which the example flow lifts the filename onto before the
+      // loop, and the same value read out of the payload the worker rewrites each iteration
+      { isAfter: false, flow: '', nodeType: '', key: 'node_red.file.name', path: 'filename' },
+      { isAfter: false, flow: '', nodeType: 'function', key: 'node_red.file.from.payload', path: 'payload.filename' },
       { isAfter: true, flow: '', nodeType: 'function', key: 'node_red.attempt', path: 'attempts' },
       { isAfter: true, flow: '', nodeType: 'function', key: 'node_red.outcome', path: 'outcome' },
       { isAfter: true, flow: '', nodeType: 'function', key: 'node_red.error.reason', path: 'lastError' },
@@ -478,7 +481,7 @@ test('the documented attribute mappings carry per attempt values through a retry
   red.wire(outcome, [[work], [done]])
 
   red.on(split, (msg, send, cb) => {
-    send({ sessionId: 'S-test', payload: { filename: 'orders-2026-07-30.csv' } })
+    send({ sessionId: 'S-test', filename: 'orders-2026-07-30.csv', payload: { filename: 'orders-2026-07-30.csv' } })
     cb()
   })
   // as the flow's worker does: fail twice, then succeed on the third attempt
@@ -510,9 +513,14 @@ test('the documented attribute mappings carry per attempt values through a retry
 
   const attempts = byName(spans, 'process attempt')
   assert.equal(attempts.length, 3)
-  // the filename survives every iteration, because the worker keeps it in the payload
+  // a top level property survives every iteration whatever the worker does to the payload
   assert.deepEqual(attempts.map((s) => s.attributes['node_red.file.name']),
     ['orders-2026-07-30.csv', 'orders-2026-07-30.csv', 'orders-2026-07-30.csv'])
+  // reading out of the payload works too, but only while the worker keeps putting it back
+  assert.deepEqual(attempts.map((s) => s.attributes['node_red.file.from.payload']),
+    ['orders-2026-07-30.csv', 'orders-2026-07-30.csv', 'orders-2026-07-30.csv'])
+  // a mapping with no node type also reaches the switch spans, which End would miss
+  assert.equal(byName(spans, 'outcome?')[0].attributes['node_red.file.name'], 'orders-2026-07-30.csv')
   assert.deepEqual(attempts.map((s) => s.attributes['node_red.attempt']), [1, 2, 3])
   assert.deepEqual(attempts.map((s) => s.attributes['node_red.outcome']), ['retry', 'retry', 'ok'])
   // the reason is only there for the attempts that failed
