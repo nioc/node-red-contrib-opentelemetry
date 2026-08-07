@@ -1,4 +1,5 @@
 .eslintrc.json
 .github
 docs
+test
 node-red-contrib-opentelemetry-*.tgz
