@@ -21,6 +21,7 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
   (`http in` headers, `mqtt in` v5 user properties, `amqp-in` headers),
 - trace includes:
   - run id,
+  - type of the node that triggered the run (`node_red.trigger.type`, on the run span),
   - message id,
   - flow id,
   - node id,
@@ -39,7 +40,8 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
 
 A trace stands for one execution of your flow. The first node to emit a message opens a **run
 span**, every node the message reaches becomes a child span, and the run span ends when the last
-of those node spans ends.
+of those node spans ends. The run span carries `node_red.trigger.type`, the type of the node
+that set the run off, so a collector can route or filter on it without reading the node spans.
 
 Node-RED gives a fresh `_msgid` to every message object a node emits (a `function` node
 returning `{payload: ...}` instead of the message it received, a `split` node, a `join` node,

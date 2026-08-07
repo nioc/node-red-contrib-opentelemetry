@@ -539,3 +539,39 @@ test('the documented attribute mappings carry per attempt values through a retry
   // but never the run span: mappings only land on the node spans below it
   assert.equal(rootOf(spans).attributes['node_red.session.id'], undefined)
 })
+
+test('the run span records what triggered the run', async () => {
+  const red = new MiniRed()
+  const httpIn = red.node('n1', 'http in', { url: '/trigger', method: 'get' })
+  const fn = red.node('n2', 'function', { name: 'work' })
+  const httpResponse = red.node('n3', 'http response')
+  red.wire(httpIn, [fn])
+  red.wire(fn, [httpResponse])
+  red.on(httpResponse, (msg, send, done) => done())
+
+  red.send(httpIn, { payload: '', req: { ip: '127.0.0.1', headers: {} }, res: { _res: { statusCode: 200 } } })
+  red.run()
+  const spans = await red.stop()
+
+  const root = rootOf(spans)
+  assert.equal(root.attributes['node_red.trigger.type'], 'http in')
+  // only the run span carries it: on a node span the type is already node_red.node.type, and
+  // "what triggered the run" would be wrong there
+  for (const span of spans.filter((span) => span !== root)) {
+    assert.equal(span.attributes['node_red.trigger.type'], undefined, `${span.name} must not claim to be the trigger`)
+  }
+  assert.equal(byName(spans, 'work')[0].attributes['node_red.node.type'], 'function')
+})
+
+test('an inject started run is labelled by its own trigger type', async () => {
+  const red = new MiniRed()
+  const inject = red.node('n1', 'inject')
+  const change = red.node('n2', 'change')
+  red.wire(inject, [change])
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(rootOf(spans).attributes['node_red.trigger.type'], 'inject')
+})
