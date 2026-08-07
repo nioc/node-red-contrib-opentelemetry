@@ -10,6 +10,13 @@
   .node-input-otelAttributeMapping-isAfterProcess {
     width: 60px !important;
   }
+  .node-input-otelHeader {
+    flex-grow: 1 !important;
+  }
+  .node-input-otelHeader input {
+    width: calc(50% - 5px) !important;
+    margin-left: 5px !important;
+  }
 </style>
 <script type="text/javascript">
 function sortAttributeMappings (a, b) {
@@ -51,6 +58,39 @@ RED.nodes.registerType('OpenTelemetry', {
       value: 'http',
       required: true,
     },
+    authScheme: {
+      value: 'none',
+      required: true,
+    },
+    authHeaderName: {
+      value: '',
+      validate: function (v) {
+        // only meaningful for the header scheme, where it must be a valid header name
+        if (this.authScheme !== 'header') {
+          return true
+        }
+        return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(v || '')
+      },
+    },
+    headers: {
+      value: [],
+      validate: function (headers) {
+        if (!headers || headers.length === 0) {
+          return true
+        }
+        const errors = []
+        headers.forEach((header) => {
+          if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(header.key || '')) {
+            errors.push(`"${header.key}" is not a valid header name`)
+          }
+        })
+        if (errors.length) {
+          console.warn(errors.join(', '))
+          return errors
+        }
+        return true
+      },
+    },
     rootPrefix: {
       value: 'Message ',
     },
@@ -90,10 +130,61 @@ RED.nodes.registerType('OpenTelemetry', {
       },
     },
   },
+  credentials: {
+    token: {
+      type: 'password',
+    },
+    username: {
+      type: 'text',
+    },
+    password: {
+      type: 'password',
+    },
+  },
   label: function () {
     return this.name || 'OpenTelemetry'
   },
   oneditprepare: function () {
+    // only show the fields the selected authentication scheme actually needs
+    const showAuthFields = function () {
+      const scheme = $('#node-input-authScheme').val()
+      // the secret field is shared by the bearer and custom header schemes
+      $('.node-input-otelAuth-token').toggle(scheme === 'bearer' || scheme === 'header')
+      $('#node-input-otelAuth-tokenLabel').text(scheme === 'header' ? 'Value' : 'Token')
+      $('.node-input-otelAuth-basic').toggle(scheme === 'basic')
+      $('.node-input-otelAuth-header').toggle(scheme === 'header')
+    }
+    $('#node-input-authScheme').on('change', showAuthFields)
+    showAuthFields()
+
+    $('#node-input-otelHeader-container').css('min-height', '90px').css('min-width', '450px').editableList({
+      addItem: function (container, i, opt) {
+        if (!Object.prototype.hasOwnProperty.call(opt, 'header')) {
+          opt.header = { key: '', value: '' }
+        }
+        container.css({
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+          display: 'flex',
+        })
+        container.append(
+          $('<div/>', { class: 'node-input-otelHeader' })
+            .append(
+              $('<input/>', { class: 'node-input-otelHeader-key', type: 'text', placeholder: 'Header name', title: 'Header name', value: opt.header.key }),
+              $('<input/>', { class: 'node-input-otelHeader-value', type: 'text', placeholder: 'Header value', title: 'Header value, do not put a secret here: use the authentication fields above', value: opt.header.value }),
+            ),
+        )
+      },
+      sortable: false,
+      removable: true,
+    })
+    // a node saved before this field existed has no headers at all: the editor only fills
+    // defaults in on import, not when loading the flows it already has
+    ;(this.headers ?? [])
+      .forEach((header) => {
+        $('#node-input-otelHeader-container').editableList('addItem', { header })
+      })
+
     $('#node-input-otelAttributeMapping-container').css('min-height', '150px').css('min-width', '450px').editableList({
       addItem: function (container, i, opt) {
         if (!Object.prototype.hasOwnProperty.call(opt, 'attributeMapping')) {
@@ -133,14 +224,23 @@ RED.nodes.registerType('OpenTelemetry', {
       sortable: false,
       removable: true,
     })
-    // sort and display attributes
-    this.attributeMappings
+    // sort and display attributes, tolerating a node saved before the field existed
+    ;(this.attributeMappings ?? [])
       .sort(sortAttributeMappings)
       .forEach((attributeMapping) => {
         $('#node-input-otelAttributeMapping-container').editableList('addItem', { attributeMapping })
       })
   },
   oneditsave: function () {
+    const headers = []
+    $('#node-input-otelHeader-container').editableList('items').each(function () {
+      const key = this.find('.node-input-otelHeader-key').val().trim()
+      if (key !== '') {
+        headers.push({ key, value: this.find('.node-input-otelHeader-value').val() })
+      }
+    })
+    this.headers = headers
+
     const attributeMappings = []
     $('#node-input-otelAttributeMapping-container').editableList('items').each(function () {
       attributeMappings.push({
@@ -173,6 +273,31 @@ RED.nodes.registerType('OpenTelemetry', {
       <option value="proto">http/protobuf</option>
     </select>
   </div>
+  <div class="form-row" title="How to authenticate against the exporter">
+    <label for="node-input-authScheme"><i class="fa fa-lock"></i> Auth</label>
+    <select id="node-input-authScheme">
+      <option value="none">None</option>
+      <option value="bearer">Bearer token</option>
+      <option value="basic">Basic (user and password)</option>
+      <option value="header">Custom header</option>
+    </select>
+  </div>
+  <div class="form-row node-input-otelAuth-header" title="Name of the header carrying the secret, for example x-api-key">
+    <label for="node-input-authHeaderName"><i class="fa fa-tag"></i> Header</label>
+    <input type="text" id="node-input-authHeaderName" placeholder="x-api-key">
+  </div>
+  <div class="form-row node-input-otelAuth-token" title="Stored with the node credentials, kept out of the flow">
+    <label for="node-input-token"><i class="fa fa-key"></i> <span id="node-input-otelAuth-tokenLabel">Token</span></label>
+    <input type="password" id="node-input-token" placeholder="Token">
+  </div>
+  <div class="form-row node-input-otelAuth-basic" title="Stored with the node credentials, kept out of the flow">
+    <label for="node-input-username"><i class="fa fa-user"></i> User</label>
+    <input type="text" id="node-input-username" placeholder="User">
+  </div>
+  <div class="form-row node-input-otelAuth-basic" title="Stored with the node credentials, kept out of the flow">
+    <label for="node-input-password"><i class="fa fa-key"></i> Password</label>
+    <input type="password" id="node-input-password" placeholder="Password">
+  </div>
   <div class="form-row" title="OpenTelemetry service name">
     <label for="node-input-serviceName"><i class="fa fa-server"></i> Service</label>
     <input type="text" id="node-input-serviceName" placeholder="Node-RED">
@@ -198,6 +323,13 @@ RED.nodes.registerType('OpenTelemetry', {
     <input type="checkbox" id="node-input-isLogging" style="display: inline-block; width: auto; vertical-align: top;">
   </div>
   <hr/>
+  <div class="form-row" style="margin-bottom:0;" title="Additional headers required by some collectors (dataset, organization, stream, ...). Do not put secrets here, use the authentication fields above.">
+    <label style="width: 100%;"><i class="fa fa-list"></i> <span> Additional exporter headers</span></label>
+  </div>
+  <div class="form-row node-input-otelHeader-container-row">
+    <ol id="node-input-otelHeader-container"></ol>
+  </div>
+  <hr/>
   <div class="form-row" style="margin-bottom:0;">
     <label style="width: 100%;"><i class="fa fa-list"></i> <span> Span attribute mappings</span></label>
   </div>
@@ -219,6 +351,15 @@ RED.nodes.registerType('OpenTelemetry', {
     <li>optional comma-separated list of <code>ignored</code> nodes that will not emit a trace,</li>
     <li>optional comma-separated list of node types that will <code>propagate</code> traces using request headers (W3C trace context propagation).</li>
   </ul></p>
+  <h3>Authentication</h3>
+  <p>Most hosted collectors require credentials. Pick an <code>auth</code> scheme:<ul>
+    <li><code>Bearer token</code> sends <code>Authorization: Bearer &lt;token&gt;</code>,</li>
+    <li><code>Basic</code> sends <code>Authorization: Basic &lt;base64 of user:password&gt;</code>,</li>
+    <li><code>Custom header</code> sends the value under the header name you give, for example <code>x-api-key</code>.</li>
+  </ul></p>
+  <p>The secret is stored with the node credentials, so it stays out of <code>flows.json</code> and out of any flow you export or commit.</p>
+  <p>Collectors asking for extra non-secret headers (a dataset, organization or stream name) can be served with <code>additional exporter headers</code>.</p>
+  <p>Headers set in the <code>OTEL_EXPORTER_OTLP_HEADERS</code> environment variable are still sent, which is handy for container deployments. A header configured here wins over the environment for the same name.</p>
   <p>You can add your own attributes to the generated spans by adding:<ul>
     <li>the <code>flow</code> identifier involved (you can leave this field empty to use in all flows),</li>
     <li>the <code>nodeType</code> involved (examples: <code>http in</code>, <code>http request</code>, <code>file in</code>, ... , you can leave this field empty to use in all node types),</li>

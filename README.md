@@ -110,12 +110,36 @@ As with every [node installation](https://nodered.org/docs/user-guide/runtime/ad
 - Setup the node:
   - set OTEL [exporter](https://opentelemetry.io/docs/instrumentation/js/exporters/) url (example for Jaeger: `http://localhost:4318/v1/traces`),
   - choose an OTLP transport protocol (`http/json` or `http/protobuf`),
+  - set the `auth` scheme your collector requires (see [Exporter authentication](#exporter-authentication)),
   - define a service name (will be displayed as span service),
   - define an optional root span prefix (will be added in Node-RED root span name),
   - define nodes that should not send traces (using comma-separated list like `debug,catch`),
   - define nodes that should propagate [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview) (in http request headers, using comma-separated list like `http request,my-custom-node`),
   - define time in seconds after which a run with no activity is considered abandoned and closed,
   - define custom attributes you want to send (optionally).
+
+### Exporter authentication
+
+Most hosted collectors require credentials. Pick an `auth` scheme on the OTEL node:
+
+| Scheme | Header sent |
+| --- | --- |
+| `None` | none |
+| `Bearer token` | `Authorization: Bearer <token>` |
+| `Basic` | `Authorization: Basic <base64 of user:password>` |
+| `Custom header` | `<header name>: <value>`, for example `x-api-key: ...` |
+
+The secret is kept in the [node credentials](https://nodered.org/docs/creating-nodes/credentials), so it is stored apart from the flow: it does not end up in `flows.json`, nor in a flow you export or commit.
+
+Collectors that also want non-secret headers (a dataset, organization or stream name) can be served with `additional exporter headers`.
+
+Headers set in the `OTEL_EXPORTER_OTLP_HEADERS` environment variable are still sent, which is convenient for container deployments:
+
+``` bash
+OTEL_EXPORTER_OTLP_HEADERS="authorization=Basic cm9vdDpwYXNz,x-tenant=acme"
+```
+
+A header configured on the node wins over the environment for the same name.
 
 ### Metrics
 
