@@ -15,9 +15,8 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
 - based on [OpenTelemetry JavaScript framework](https://github.com/open-telemetry/opentelemetry-js) and [Node-RED messaging hooks](https://nodered.org/docs/api/hooks/messaging):
   - create spans on `onSend(source)` and `postDeliver(destination)` events,
   - end spans on `onComplete` and `postDeliver(source)` events.
-- **one trace per flow execution**: every node a message reaches is a span below a single run
-  span, whatever the message identifier changes along the way (see [Traces and runs](#traces-and-runs)),
-- continues the caller trace when the entry node receives a [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview)
+- one trace per flow execution: every node reached by a message is a child span of a trace, regardless of any changes made to the message's identifier (see [What is a _run span_?](#what-is-a-run-span)),
+- completes the caller trace when the entry node receives a [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview)
   (`http in` headers, `mqtt in` v5 user properties, `amqp-in` headers),
 - trace includes:
   - run id,
@@ -36,31 +35,18 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
 
 ![Example spans to metrics in Grafana](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_02.png "Example spans to metrics")
 
-### Traces and runs
+#### What is a _run span_?
 
-A trace stands for one execution of your flow. The first node to emit a message opens a **run
-span**, every node the message reaches becomes a child span, and the run span ends when the last
-of those node spans ends. The run span carries `node_red.trigger.type`, the type of the node
-that set the run off, so a collector can route or filter on it without reading the node spans.
+A trace corresponds to an execution of your flow. The first node to emit a message opens a **run span**, each node reached by the message becomes a child span, and the run span ends when the last of those node spans ends. The run span carries `node_red.trigger.type`, which is the type of the node that triggered the execution. This allows a collector to route or filter it without having to read the spans of the individual nodes.
 
-Node-RED gives a fresh `_msgid` to every message object a node emits (a `function` node
-returning `{payload: ...}` instead of the message it received, a `split` node, a `join` node,
-...). To keep those in the same trace, the run is carried on the message in the
-`otelRootMsgId` property, which you will therefore see on messages in the debug sidebar.
+Node-RED gives a fresh `_msgid` to every message object a node emits (a `function` node returning `{payload: ...}` instead of the message it received, a `split` node, a `join` node, ...). To keep those in the same trace, the run is carried on the message in the `otelRootMsgId` property, which you will therefore see on messages in the debug sidebar.
 
-Two situations deliberately produce more than one trace, following the
-[messaging semantic conventions](https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/):
+Two situations deliberately produce more than one trace, following the [messaging semantic conventions](https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/):
 
-- a node that acknowledges a message and emits later (`delay`, `trigger`, a rate limiter) hands
-  over to a new run, linked to the one it came from with a span link
-  (`node_red.link.type: continuation`),
-- a message published to a broker and consumed by another flow is a run of its own, correlated
-  through the propagated trace context.
+- a node that acknowledges a message and emits later (`delay`, `trigger`, a rate limiter) hands over to a new run, linked to the one it came from with a span link (`node_red.link.type: continuation`),
+- a message published to a broker and consumed by another flow is a run of its own, correlated through the propagated trace context.
 
-Nodes that never report completion (`tcp in`, `server-events`, ...) get their span closed once
-the message they created has been dispatched. A run left unfinished past the configured
-`timeout` is closed by a sweep, and the node spans still open are ended and flagged with
-`node_red.span.incomplete` instead of being dropped.
+Nodes that never report completion (`tcp in`, `server-events`, ...) have their spans closed as soon as the message they created has been dispatched. A run that remains incomplete beyond the configured `timeout` is closed by a cleanup, and the spans of nodes that are still open are ended and flagged with `node_red.span.incomplete` instead of being dropped.
 
 ### Metrics
 
@@ -115,23 +101,23 @@ As with every [node installation](https://nodered.org/docs/user-guide/runtime/ad
   - define an optional root span prefix (will be added in Node-RED root span name),
   - define nodes that should not send traces (using comma-separated list like `debug,catch`),
   - define nodes that should propagate [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview) (in http request headers, using comma-separated list like `http request,my-custom-node`),
-  - define time in seconds after which a run with no activity is considered abandoned and closed,
+  - define time in seconds after which an inactive run is considered abandoned and closed,
   - define custom attributes you want to send (optionally).
 
-### Exporter authentication
+#### Exporter authentication
 
-Most hosted collectors require credentials. Pick an `auth` scheme on the OTEL node:
+Most hosted collectors require credentials. Select an authentication scheme on the OTEL configuration node:
 
-| Scheme | Header sent |
-| --- | --- |
-| `None` | none |
-| `Bearer token` | `Authorization: Bearer <token>` |
-| `Basic` | `Authorization: Basic <base64 of user:password>` |
-| `Custom header` | `<header name>: <value>`, for example `x-api-key: ...` |
+| Scheme          	| Header sent                                            	|
+|-----------------	|--------------------------------------------------------	|
+| `None`          	| none                                                   	|
+| `Bearer token`  	| `Authorization: Bearer <token>`                        	|
+| `Basic`         	| `Authorization: Basic <base64 of user:password>`       	|
+| `Custom header` 	| `<header name>: <value>`, for example `x-api-key: ...` 	|
 
 The secret is kept in the [node credentials](https://nodered.org/docs/creating-nodes/credentials), so it is stored apart from the flow: it does not end up in `flows.json`, nor in a flow you export or commit.
 
-Collectors that also want non-secret headers (a dataset, organization or stream name) can be served with `additional exporter headers`.
+It is also possible to send non-confidential headers (such as the name of a dataset, an organization, or a feed) via the `additional exporter headers`.
 
 Headers set in the `OTEL_EXPORTER_OTLP_HEADERS` environment variable are still sent, which is convenient for container deployments:
 
@@ -139,7 +125,7 @@ Headers set in the `OTEL_EXPORTER_OTLP_HEADERS` environment variable are still s
 OTEL_EXPORTER_OTLP_HEADERS="authorization=Basic cm9vdDpwYXNz,x-tenant=acme"
 ```
 
-A header configured on the node wins over the environment for the same name.
+A header configured on the node takes precedence over the environment for the same name.
 
 ### Metrics
 
@@ -169,7 +155,9 @@ See the [releases](https://github.com/nioc/node-red-contrib-opentelemetry/releas
 - **[Nioc](https://github.com/nioc/)** - _Initial work_
 - **[Wodka](https://github.com/wodka/)** - _AMQP headers and `CompositePropagator` (Jaeger, W3C, B3)_
 - **[Akrpic77](https://github.com/akrpic77/)** - _MQTT v5 context fields_
-- **[joshendriks](https://github.com/joshendriks/)** - _Protobuf trace-exporter support_
+- **[Joshendriks](https://github.com/joshendriks/)** - _Protobuf trace-exporter support_
+- **[Czepiec](https://github.com/czepiec/)** - _`node_red.flow.name` span attribute_
+- **[Syron](https://github.com/syron/)** - _Improve flow tracing (per run), exporter authentication and tests_
 
 See also the full list of [contributors](https://github.com/nioc/node-red-contrib-opentelemetry/graphs/contributors) to this project.
 
