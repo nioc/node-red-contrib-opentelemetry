@@ -1,6 +1,6 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { MiniRed, sleep } = require('./helpers/mini-red')
+const { MiniRed, sleep, settle } = require('./helpers/mini-red')
 
 /** ReadableSpan exposes the parent as `parentSpanId` (SDK 1.x) or `parentSpanContext` (2.x) */
 function parentSpanIdOf (span) {
@@ -189,7 +189,9 @@ test('a message emitted after the run finished starts a linked trace', async () 
 
   red.send(inject, { payload: 1 })
   red.run()
-  // the queued message is released once the first run is already over
+  // a delay node emits on a timer, so the release lands in a later turn, by which point the
+  // first run has gone quiet and been closed
+  await settle()
   red.send(delay, { payload: 'released' })
   red.run()
   const spans = await red.stop()
@@ -574,4 +576,73 @@ test('an inject started run is labelled by its own trigger type', async () => {
   const spans = await red.stop()
 
   assert.equal(rootOf(spans).attributes['node_red.trigger.type'], 'inject')
+})
+
+/**
+ * A node sends to all of its wires from one `send()`, and the runtime delivers them one at a
+ * time. An entry node's span is closed on delivery, since it never reports completion, so the
+ * run must not be declared over while the later wires of that same send are still to come.
+ * @param {object} options
+ * @param {string} options.ignoredTypes Node types excluded from tracing
+ * @param {boolean} options.debugFirst Is the ignored node the first wire?
+ */
+async function fanOutFromEntryNode ({ ignoredTypes, debugFirst }) {
+  const red = new MiniRed({ ignoredTypes })
+  const mqtt = red.node('n1', 'mqtt in', { name: 'home/sensor/pool/pump' })
+  const raw = red.node('n2', 'debug', { name: 'Raw pump message' })
+  const stamp = red.node('n3', 'change', { name: 'Set timestamp' })
+  const store = red.node('n4', 'influxdb out', { name: 'Save pump data' })
+  red.wire(mqtt, debugFirst ? [raw, stamp] : [stamp, raw])
+  red.wire(stamp, [store])
+  red.on(store, (msg, send, done) => done())
+
+  red.send(mqtt, { payload: { power: 900 } })
+  red.run()
+  return red.stop()
+}
+
+test('an entry node fanning out to an untraced node first stays one trace', async () => {
+  // the untraced node produces no span, so nothing else was open at that instant
+  const spans = await fanOutFromEntryNode({ ignoredTypes: 'debug,catch', debugFirst: true })
+
+  assert.equal(traceIdsOf(spans).size, 1, 'the whole execution must be one trace')
+  const root = rootOf(spans)
+  assert.equal(root.name, 'Message home/sensor/pool/pump')
+  assert.equal(root.links.length, 0, 'a fan out is not an asynchronous hand off, so no link')
+  for (const name of ['home/sensor/pool/pump', 'Set timestamp', 'Save pump data']) {
+    assert.equal(byName(spans, name).length, 1, `${name} must be in the trace`)
+    assert.equal(parentSpanIdOf(byName(spans, name)[0]), root.spanContext().spanId)
+  }
+})
+
+test('the wiring order of an untraced node does not change the trace', async () => {
+  // this used to differ: only the first ordering split the execution in two
+  const first = await fanOutFromEntryNode({ ignoredTypes: 'debug,catch', debugFirst: true })
+  const second = await fanOutFromEntryNode({ ignoredTypes: 'debug,catch', debugFirst: false })
+  const tracedToo = await fanOutFromEntryNode({ ignoredTypes: '', debugFirst: true })
+
+  assert.equal(traceIdsOf(first).size, 1)
+  assert.equal(traceIdsOf(second).size, 1)
+  assert.equal(traceIdsOf(tracedToo).size, 1)
+  assert.deepEqual(
+    first.map((span) => span.name).sort(),
+    second.map((span) => span.name).sort(),
+    'the same flow must produce the same spans whichever wire comes first',
+  )
+})
+
+test('an entry node whose only wire is untraced still closes its run', async () => {
+  const red = new MiniRed()
+  const mqtt = red.node('n1', 'mqtt in', { name: 'pump' })
+  const raw = red.node('n2', 'debug')
+  red.wire(mqtt, [raw])
+
+  red.send(mqtt, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  // nothing follows, so the run really is over: it must still be exported, not left hanging
+  assert.equal(traceIdsOf(spans).size, 1)
+  assert.equal(byName(spans, 'pump').length, 1)
+  assert.equal(spans.filter((span) => span.attributes['node_red.span.incomplete']).length, 0)
 })
