@@ -279,6 +279,9 @@ class MiniRed {
    * @returns {Promise<import('@opentelemetry/sdk-trace-base').ReadableSpan[]>}
    */
   async stop () {
+    // a run is closed once the current turn has settled, so give the runtime that turn before
+    // shutting down, exactly as it would get between two deliveries
+    await settle()
     await this.closeHandler()
     return exportedSpans.slice()
   }
@@ -289,4 +292,9 @@ function sleep (ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-module.exports = { MiniRed, sleep, nextMsgId }
+/** Let the current turn finish, which is when a quiet run gets closed */
+function settle () {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+module.exports = { MiniRed, sleep, settle, nextMsgId }
