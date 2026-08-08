@@ -1,6 +1,6 @@
 {
   "name": "node-red-contrib-opentelemetry",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for Node-RED",
   "scripts": {
     "lint": "eslint . --fix",
@@ -19,7 +19,29 @@
     "metrics",
     "prometheus"
   ],
-  "author": "nioc <dev@nioc.eu>",
+  "author": "nioc <dev@nioc.eu> (https://github.com/nioc/)",
+  "contributors": [
+    {
+      "name": "Wodka",
+      "url": "https://github.com/wodka/"
+    },
+    {
+      "name": "Akrpic77",
+      "url": "https://github.com/akrpic77/"
+    },
+    {
+      "name": "Joshendriks",
+      "url": "https://github.com/joshendriks/"
+    },
+    {
+      "name": "Czepiec",
+      "url": "https://github.com/czepiec/"
+    },
+    {
+      "name": "Syron",
+      "url": "https://github.com/syron/"
+    }
+  ],
   "license": "LGPL-3.0-or-later",
   "homepage": "https://github.com/nioc/node-red-contrib-opentelemetry",
   "repository": {
