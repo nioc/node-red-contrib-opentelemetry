@@ -39,6 +39,10 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
 
 A trace corresponds to an execution of your flow. The first node to emit a message opens a **run span**, each node reached by the message becomes a child span, and the run span ends when the last of those node spans ends. The run span carries `node_red.trigger.type`, which is the type of the node that triggered the execution. This allows a collector to route or filter it without having to read the spans of the individual nodes.
 
+The run span is the _local root span_: it is the root of the trace unless a trace context arrived with the message, in which case it is a child of the caller's span.
+
+By default every node span is a child of it, which gives a flat timeline that reads easily and shows at a glance where the time went. Tick **nest spans** to make a node span a child of the span of the node that sent it the message instead, so the trace follows the wiring of your flow. That suits tracking the path a message took, or building a dependency graph, at the cost of a deeper waterfall. A chain deeper than 50 restarts from the local root span, so a long loop cannot bury itself.
+
 Node-RED gives a fresh `_msgid` to every message object a node emits (a `function` node returning `{payload: ...}` instead of the message it received, a `split` node, a `join` node, ...). To keep those in the same trace, the run is carried on the message in the `otelRootMsgId` property, which you will therefore see on messages in the debug sidebar.
 
 Two situations deliberately produce more than one trace, following the [messaging semantic conventions](https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/):

@@ -53,6 +53,7 @@ const DEFAULT_CONFIG = {
   ignoredTypes: 'debug,catch',
   propagateHeadersTypes: '',
   isLogging: false,
+  isNestSpansMode: false,
   timeout: 10,
   attributeMappings: [],
 }

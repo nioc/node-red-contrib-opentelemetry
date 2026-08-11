@@ -646,3 +646,167 @@ test('an entry node whose only wire is untraced still closes its run', async () 
   assert.equal(byName(spans, 'pump').length, 1)
   assert.equal(spans.filter((span) => span.attributes['node_red.span.incomplete']).length, 0)
 })
+
+/** Name of the span a given span hangs off, so the causal chain can be asserted directly */
+function parentNameOf (spans, span) {
+  const parent = spans.find((candidate) => candidate.spanContext().spanId === parentSpanIdOf(span))
+  return parent === undefined ? undefined : parent.name
+}
+
+test('span nesting is off by default, so every node span hangs off the local root span', async () => {
+  const red = new MiniRed({ ignoredTypes: '' })
+  const inject = red.node('n1', 'inject', { name: 'start' })
+  const first = red.node('n2', 'change', { name: 'first' })
+  const second = red.node('n3', 'change', { name: 'second' })
+  red.wire(inject, [first])
+  red.wire(first, [second])
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  const root = rootOf(spans)
+  for (const span of spans.filter((span) => span !== root)) {
+    assert.equal(parentSpanIdOf(span), root.spanContext().spanId, `${span.name} must stay flat`)
+  }
+})
+
+test('a chain of nodes nests by what sent to what', async () => {
+  const red = new MiniRed({ ignoredTypes: '', isNestSpansMode: true })
+  const inject = red.node('n1', 'inject', { name: 'start' })
+  const first = red.node('n2', 'change', { name: 'first' })
+  const second = red.node('n3', 'change', { name: 'second' })
+  const third = red.node('n4', 'change', { name: 'third' })
+  red.wire(inject, [first])
+  red.wire(first, [second])
+  red.wire(second, [third])
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  const root = rootOf(spans)
+  assert.equal(parentNameOf(spans, byName(spans, 'start')[0]), root.name, 'the entry node hangs off the run')
+  assert.equal(parentNameOf(spans, byName(spans, 'first')[0]), 'start')
+  assert.equal(parentNameOf(spans, byName(spans, 'second')[0]), 'first')
+  assert.equal(parentNameOf(spans, byName(spans, 'third')[0]), 'second')
+})
+
+test('a fan out puts both branches under the node that sent them', async () => {
+  const red = new MiniRed({ ignoredTypes: '', isNestSpansMode: true })
+  const inject = red.node('n1', 'inject', { name: 'start' })
+  const fork = red.node('n2', 'change', { name: 'fork' })
+  const left = red.node('n3', 'change', { name: 'left' })
+  const right = red.node('n4', 'change', { name: 'right' })
+  red.wire(inject, [fork])
+  red.wire(fork, [left, right])
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(traceIdsOf(spans).size, 1)
+  assert.equal(parentNameOf(spans, byName(spans, 'left')[0]), 'fork')
+  assert.equal(parentNameOf(spans, byName(spans, 'right')[0]), 'fork', 'the second wire nests too, though fork closed on the first')
+})
+
+test('a fan in gives each arriving message its own span under its own sender', async () => {
+  // a span has one parent, so a join is only ambiguous if it gets one span for N messages.
+  // It gets one per arrival, so each simply hangs off whichever branch delivered it.
+  const red = new MiniRed({ ignoredTypes: '', isNestSpansMode: true })
+  const inject = red.node('n1', 'inject', { name: 'start' })
+  const fork = red.node('n2', 'change', { name: 'fork' })
+  const left = red.node('n3', 'change', { name: 'left' })
+  const right = red.node('n4', 'change', { name: 'right' })
+  const join = red.node('n5', 'join', { name: 'gather' })
+  red.wire(inject, [fork])
+  red.wire(fork, [[left], [right]]) // two outputs, one message each
+  red.wire(left, [join])
+  red.wire(right, [join])
+  red.on(fork, (msg, send, done) => {
+    const parts = ['l', 'r'].map((branch) => {
+      const part = { ...msg, payload: branch }
+      delete part._msgid
+      return part
+    })
+    send(parts)
+    done()
+  })
+  const gathered = []
+  red.on(join, (msg, send, done) => { gathered.push(msg.payload); done() })
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  const joins = byName(spans, 'gather')
+  assert.equal(joins.length, 2, 'one span per message reaching the join')
+  assert.deepEqual(joins.map((span) => parentNameOf(spans, span)).sort(), ['left', 'right'])
+})
+
+test('a loop stops nesting once it gets too deep to read', async () => {
+  const red = new MiniRed({ ignoredTypes: '', isNestSpansMode: true })
+  const inject = red.node('n1', 'inject', { name: 'start' })
+  const work = red.node('n2', 'function', { name: 'work' })
+  const again = red.node('n3', 'switch', { name: 'again?' })
+  const out = red.node('n4', 'change', { name: 'out' })
+  red.wire(inject, [work])
+  red.wire(work, [again])
+  red.wire(again, [[work], [out]])
+  const ROUNDS = 60 // deeper than MAX_NESTING_DEPTH, which is 50
+  red.on(work, (msg, send, done) => {
+    msg.n = (msg.n || 0) + 1
+    send(msg)
+    done()
+  })
+  red.on(again, (msg, send, done) => {
+    send(msg.n < ROUNDS ? [msg, null] : [null, msg])
+    done()
+  })
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(traceIdsOf(spans).size, 1, 'a loop is still one trace')
+  assert.equal(byName(spans, 'work').length, ROUNDS, 'one span per iteration')
+
+  // each pass nests under the previous one, so without a cap this chain would be ~120 deep
+  const byId = new Map(spans.map((span) => [span.spanContext().spanId, span]))
+  const depthOf = (span) => {
+    let depth = 0
+    let cursor = span
+    while (parentSpanIdOf(cursor) && byId.has(parentSpanIdOf(cursor))) {
+      cursor = byId.get(parentSpanIdOf(cursor))
+      depth++
+    }
+    return depth
+  }
+  const deepest = Math.max(...spans.map(depthOf))
+  assert.ok(deepest <= 51, `nesting must stop at the cap, reached ${deepest}`)
+  assert.ok(deepest > 10, 'shallow iterations must still nest, otherwise the cap is doing nothing')
+
+  // past the cap a span restarts from the local root span rather than burying itself further
+  const root = rootOf(spans)
+  const rehomed = spans.filter((span) => parentNameOf(spans, span) === root.name && span.name !== 'start')
+  assert.ok(rehomed.length > 0, 'something past the cap must fall back to the local root span')
+})
+
+test('an untraced node in the middle of a flow does not cut the chain', async () => {
+  // `catch` is untraced by default and can sit mid flow, unlike `debug` which is usually a leaf
+  const red = new MiniRed({ ignoredTypes: 'catch', isNestSpansMode: true })
+  const inject = red.node('n1', 'inject', { name: 'start' })
+  const skipped = red.node('n2', 'catch', { name: 'not traced' })
+  const after = red.node('n3', 'change', { name: 'after' })
+  red.wire(inject, [skipped])
+  red.wire(skipped, [after])
+
+  red.send(inject, { payload: 1 })
+  red.run()
+  const spans = await red.stop()
+
+  assert.equal(byName(spans, 'not traced').length, 0, 'the untraced node gets no span')
+  // without passing the parent through, "after" would fall back to the local root span
+  assert.equal(parentNameOf(spans, byName(spans, 'after')[0]), 'start',
+    'the chain skips the untraced node to the nearest traced one')
+})

@@ -110,6 +110,9 @@ RED.nodes.registerType('OpenTelemetry', {
     isLogging: {
       value: false,
     },
+    isNestSpansMode: {
+      value: false,
+    },
     attributeMappings: {
       value: [],
       validate: function (attributeMappings) {
@@ -325,6 +328,10 @@ RED.nodes.registerType('OpenTelemetry', {
     <label for="node-input-timeout"><i class="fa fa-hourglass"></i> Timeout</label>
     <input type="number" id="node-input-timeout" placeholder="10">
   </div>
+  <div class="form-row" title="Make each node span a child of the node that sent it the message, instead of a child of the local root span">
+    <label for="node-input-isNestSpansMode"><i class="fa fa-sitemap"></i> Nest spans</label>
+    <input type="checkbox" id="node-input-isNestSpansMode" style="display: inline-block; width: auto; vertical-align: top;">
+  </div>
   <div class="form-row" title="Send debug logs to the console">
     <label for="node-input-isLogging"><i class="fa fa-bug"></i> Debug log</label>
     <input type="checkbox" id="node-input-isLogging" style="display: inline-block; width: auto; vertical-align: top;">
@@ -373,6 +380,9 @@ RED.nodes.registerType('OpenTelemetry', {
     <li>an <a href="https://opentelemetry.io/docs/concepts/signals/traces/#attributes" target="_blank" rel="noopener noreferrer">OTEL span attribute <code>key</code></a> (<code>node_red.action</code> for example)</li>
     <li>the <code>path</code> in the processed message object in <a href="https://jmespath.org/" target="_blank" rel="noopener noreferrer">JMESPath syntax</a>, starting after <code>msg.</code> (<code>payload.action</code> for example); alternatively, you can specify the attribute value as a fixed string enclosed in single or double quotes (e.g., <code>"myValue"</code>)</li>
   </ul></p>
+  <h3>Span nesting</h3>
+  <p>By default every node span is a child of the local root span, which gives a flat timeline that is easy to read and shows at a glance where the time went.</p>
+  <p>With <code>nest spans</code> ticked, a node span is instead a child of the span of the node that sent it the message, so the trace follows the wiring of your flow. That suits tracking the path a message took, or building a dependency graph, at the cost of a deeper and busier waterfall. A chain deeper than 50 restarts from the local root span, so a long loop cannot bury itself.</p>
   <p>This node should only be added once for all your Node-Red flows (regardless of location).</p>
   <h3>References</h3>
   <ul>
