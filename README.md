@@ -15,12 +15,11 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
 - based on [OpenTelemetry JavaScript framework](https://github.com/open-telemetry/opentelemetry-js) and [Node-RED messaging hooks](https://nodered.org/docs/api/hooks/messaging):
   - create spans on `onSend(source)` and `postDeliver(destination)` events,
   - end spans on `onComplete` and `postDeliver(source)` events.
-- one trace per flow execution: every node reached by a message is a child span of a trace, regardless of any changes made to the message's identifier (see [What is a _run span_?](#what-is-a-run-span)),
-- completes the caller trace when the entry node receives a [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview)
-  (`http in` headers, `mqtt in` v5 user properties, `amqp-in` headers),
+- one trace per flow execution: every node reached by a message is a child span of a trace, regardless of any changes made to the message's identifier (see [What is a _local root span_?](#what-is-a-local-root-span)),
+- completes the caller trace when the entry node receives a [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview) (`http in` headers, `mqtt in` v5 user properties, `amqp-in` headers),
 - trace includes:
-  - run id,
-  - type of the node that triggered the run (`node_red.trigger.type`, on the run span),
+  - run id (internal identifier, based on msg._id and an incremental sequence),
+  - type of the node that triggered the message (`node_red.trigger.type`, on the local root span),
   - message id,
   - flow id,
   - node id,
@@ -35,22 +34,22 @@ Distributed tracing with OpenTelemetry SDK and Prometheus metrics exporter for N
 
 ![Example spans to metrics in Grafana](https://raw.githubusercontent.com/nioc/node-red-contrib-opentelemetry/master/docs/Screenshot_02.png "Example spans to metrics")
 
-#### What is a _run span_?
+#### What is a _local root span_?
 
-A trace corresponds to an execution of your flow. The first node to emit a message opens a **run span**, each node reached by the message becomes a child span, and the run span ends when the last of those node spans ends. The run span carries `node_red.trigger.type`, which is the type of the node that triggered the execution. This allows a collector to route or filter it without having to read the spans of the individual nodes.
+A trace corresponds to an execution of your flow. The first node to emit a message opens a **local root span**, each node reached by the message becomes a child span, and the local root span ends when the last of those node spans ends. The local root span carries `node_red.trigger.type`, which is the type of the node that triggered the execution. This allows a collector to route or filter it without having to read the spans of the individual nodes.
 
-The run span is the _local root span_: it is the root of the trace unless a trace context arrived with the message, in which case it is a child of the caller's span.
+The **local** root span corresponds to the root of the trace, unless a trace context has been passed with the message, in which case it is a child span of the caller's span.
 
-By default every node span is a child of it, which gives a flat timeline that reads easily and shows at a glance where the time went. Tick **nest spans** to make a node span a child of the span of the node that sent it the message instead, so the trace follows the wiring of your flow. That suits tracking the path a message took, or building a dependency graph, at the cost of a deeper waterfall. A chain deeper than 50 restarts from the local root span, so a long loop cannot bury itself.
+By default, every node span is a child of it, resulting in a flat timeline that is easy to read and allows you to see at a glance where time has elapsed. Check the `Nest spans` box in the OTEL node configuration so that a node span becomes a child of the span of the node that sent it the message. This allows you to trace the path taken by a message or build a dependency graph, at the cost of a deeper waterfall. A chain with more than 50 levels restarts from the local root span.
 
-Node-RED gives a fresh `_msgid` to every message object a node emits (a `function` node returning `{payload: ...}` instead of the message it received, a `split` node, a `join` node, ...). To keep those in the same trace, the run is carried on the message in the `otelRootMsgId` property, which you will therefore see on messages in the debug sidebar.
+Node-RED assigns a fresh `_msgid` to each message object emitted by a node. To keep those in the same trace, the run identifier is carried in the message's new `otelRootMsgId` property (known internally as `runId`).
 
 Two situations deliberately produce more than one trace, following the [messaging semantic conventions](https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/):
 
-- a node that acknowledges a message and emits later (`delay`, `trigger`, a rate limiter) hands over to a new run, linked to the one it came from with a span link (`node_red.link.type: continuation`),
-- a message published to a broker and consumed by another flow is a run of its own, correlated through the propagated trace context.
+- a **node that acknowledges receipt of a message and emits later** (`delay`, `trigger`, rate limiter) creates a new trace, connected to the one from which it originated by a span link (`node_red.link.type: continuation`),
+- a **message published to a broker and consumed by another flow** creates a new trace, correlated through the propagated trace context.
 
-Nodes that never report completion (`tcp in`, `server-events`, ...) have their spans closed as soon as the message they created has been dispatched. A run that remains incomplete beyond the configured `timeout` is closed by a cleanup, and the spans of nodes that are still open are ended and flagged with `node_red.span.incomplete` instead of being dropped.
+Nodes that never report completion (`tcp in`, `server-events`, ...) have their spans closed as soon as the message they created has been dispatched. A trace that remains incomplete beyond the configured `timeout` is closed by a cleanup, and the spans of nodes that are still open are ended and flagged with `node_red.span.incomplete` instead of being dropped.
 
 ### Metrics
 
@@ -102,15 +101,17 @@ As with every [node installation](https://nodered.org/docs/user-guide/runtime/ad
   - choose an OTLP transport protocol (`http/json` or `http/protobuf`),
   - set the `auth` scheme your collector requires (see [Exporter authentication](#exporter-authentication)),
   - define a service name (will be displayed as span service),
-  - define an optional root span prefix (will be added in Node-RED root span name),
+  - define naming convention for the local root spans:
+    - optional root span prefix (will be added in Node-RED root span name),
+    - whether or not to include the flow name,
   - define nodes that should not send traces (using comma-separated list like `debug,catch`),
-  - define nodes that should propagate [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview) (in http request headers, using comma-separated list like `http request,my-custom-node`),
-  - define time in seconds after which an inactive run is considered abandoned and closed,
-  - define custom attributes you want to send (optionally).
+  - define nodes that should propagate [W3C trace context](https://www.w3.org/TR/trace-context/#design-overview) (in http request headers, using a comma-separated list; for example: `http request,my-custom-node`),
+  - define time in seconds after which an inactive local root span is considered abandoned and closed,
+  - define custom span attributes you want to send (optionally).
 
 #### Exporter authentication
 
-Most hosted collectors require credentials. Select an authentication scheme on the OTEL configuration node:
+If your collector requires authentication, select an authentication scheme in the OTEL configuration node:
 
 | Scheme          	| Header sent                                            	|
 |-----------------	|--------------------------------------------------------	|
@@ -150,7 +151,7 @@ A header configured on the node takes precedence over the environment for the sa
 
 ## Versioning
 
-node-red-contrib-opentelemetry is maintained under the [semantic versioning](https://semver.org/) guidelines.
+`node-red-contrib-opentelemetry` is maintained under the [semantic versioning](https://semver.org/) guidelines.
 
 See the [releases](https://github.com/nioc/node-red-contrib-opentelemetry/releases) on this repository for changelog.
 
@@ -161,7 +162,7 @@ See the [releases](https://github.com/nioc/node-red-contrib-opentelemetry/releas
 - **[Akrpic77](https://github.com/akrpic77/)** - _MQTT v5 context fields_
 - **[Joshendriks](https://github.com/joshendriks/)** - _Protobuf trace-exporter support_
 - **[Czepiec](https://github.com/czepiec/)** - _`node_red.flow.name` span attribute_
-- **[Syron](https://github.com/syron/)** - _Improve flow tracing (per run), exporter authentication and tests_
+- **[Syron](https://github.com/syron/)** - _Improve flow tracing (per run), exporter authentication, nested spans and tests_
 
 See also the full list of [contributors](https://github.com/nioc/node-red-contrib-opentelemetry/graphs/contributors) to this project.
 

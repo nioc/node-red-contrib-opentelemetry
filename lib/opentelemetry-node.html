@@ -279,7 +279,7 @@ RED.nodes.registerType('OpenTelemetry', {
       <option value="proto">http/protobuf</option>
     </select>
   </div>
-  <div class="form-row" title="How to authenticate against the exporter">
+  <div class="form-row" title="Collector's authentication scheme">
     <label for="node-input-authScheme"><i class="fa fa-lock"></i> Auth</label>
     <select id="node-input-authScheme">
       <option value="none">None</option>
@@ -308,11 +308,11 @@ RED.nodes.registerType('OpenTelemetry', {
     <label for="node-input-serviceName"><i class="fa fa-server"></i> Service</label>
     <input type="text" id="node-input-serviceName" placeholder="Node-RED">
   </div>
-  <div class="form-row" title="Prefix added in the root Node-RED span name before initial node name">
+  <div class="form-row" title="Prefix added in the local root span name before initial node name">
     <label for="node-input-rootPrefix"><i class="fa fa-tag"></i> Root prefix</label>
     <input type="text" id="node-input-rootPrefix" placeholder="Message ">
   </div>
-  <div class="form-row" title="Add the flow name in the root Node-RED span name before initial node name">
+  <div class="form-row" title="Add the flow name in the local root span name before initial node name">
     <label for="node-input-hasFlowNameInRoot"><i class="fa fa-tag"></i> Flow name</label>
     <input type="checkbox" id="node-input-hasFlowNameInRoot" style="display: inline-block; width: auto; vertical-align: top;">
   </div>
@@ -324,12 +324,12 @@ RED.nodes.registerType('OpenTelemetry', {
     <label for="node-input-propagateHeadersTypes"><i class="fa fa-suitcase"></i> Propagate</label>
     <input type="text" id="node-input-propagateHeadersTypes" placeholder="mycustomnode,othernode">
   </div>
-  <div class="form-row" title="Time in seconds after which a run with no activity is considered abandoned and closed">
+  <div class="form-row" title="Time in seconds after which a local root span with no activity is considered abandoned and closed">
     <label for="node-input-timeout"><i class="fa fa-hourglass"></i> Timeout</label>
     <input type="number" id="node-input-timeout" placeholder="10">
   </div>
   <div class="form-row" title="Make each node span a child of the node that sent it the message, instead of a child of the local root span">
-    <label for="node-input-isNestSpansMode"><i class="fa fa-sitemap"></i> Nest spans</label>
+    <label for="node-input-isNestSpansMode"><i class="fa fa-indent"></i> Nest spans</label>
     <input type="checkbox" id="node-input-isNestSpansMode" style="display: inline-block; width: auto; vertical-align: top;">
   </div>
   <div class="form-row" title="Send debug logs to the console">
@@ -355,9 +355,9 @@ RED.nodes.registerType('OpenTelemetry', {
 <script type="text/html" data-help-name="OpenTelemetry">
   <p>Send Node-RED traces to OpenTelemetry collector (like Jaeger or Zipkin).</p>
   <h3>Details</h3>
-  <p>With this node enabled, each execution of a flow will generate a trace composed of the traces (spans) of each node traversed.</p>
-  <p>The node that starts an execution opens the run span, every node the message reaches is a span below it, and the run span ends once the last of them ends. Messages created along the way (by a <code>function</code>, <code>split</code> or <code>join</code> node for example) stay in the same trace: the run is carried in the <code>otelRootMsgId</code> message property. When the entry node receives a trace context from outside Node-RED, the run continues the caller trace instead of starting a new one.</p>
-  <p>A node that acknowledges a message and emits it later (<code>delay</code>, <code>trigger</code>, ...) hands over to a new trace, linked to the one it came from.</p>
+  <p>With this node enabled, each execution of a flow will generate a trace composed of the spans of each node traversed.</p>
+  <p>The node that starts an execution opens a local root span, every node the message reaches is a span below it, and the local root span ends once the last of them ends. Messages created along the way (by a <code>function</code>, <code>split</code> or <code>join</code> node for example) stay in the same trace: the run id is carried in the <code>otelRootMsgId</code> message property. When the entry node receives a trace context from outside Node-RED, the local root span continues the caller trace instead of starting a new one.</p>
+  <p>A node that acknowledges receipt of a message and emits later (<code>delay</code>, <code>trigger</code>, ...) creates a new trace, connected to the one from which it originated.</p>
   <p>You must set:<ul>
     <li>the <code>url</code> of the exporter,</li>
     <li>the <code>service</code> name displayed in your visualization tool,</li>
@@ -365,28 +365,35 @@ RED.nodes.registerType('OpenTelemetry', {
     <li>optional comma-separated list of <code>ignored</code> nodes that will not emit a trace,</li>
     <li>optional comma-separated list of node types that will <code>propagate</code> traces using request headers (W3C trace context propagation).</li>
   </ul></p>
-  <h3>Authentication</h3>
-  <p>Most hosted collectors require credentials. Pick an <code>auth</code> scheme:<ul>
+  <hr/>
+  <h4>Authentication</h4>
+  <p>If your collector requires authentication, select an <code>auth</code> scheme:<ul>
     <li><code>Bearer token</code> sends <code>Authorization: Bearer &lt;token&gt;</code>,</li>
     <li><code>Basic</code> sends <code>Authorization: Basic &lt;base64 of user:password&gt;</code>,</li>
     <li><code>Custom header</code> sends the value under the header name you give, for example <code>x-api-key</code>.</li>
   </ul></p>
-  <p>The secret is stored with the node credentials, so it stays out of <code>flows.json</code> and out of any flow you export or commit.</p>
-  <p>Collectors asking for extra non-secret headers (a dataset, organization or stream name) can be served with <code>additional exporter headers</code>.</p>
-  <p>Headers set in the <code>OTEL_EXPORTER_OTLP_HEADERS</code> environment variable are still sent, which is handy for container deployments. A header configured here wins over the environment for the same name.</p>
+  <p>The secret is stored with the node credentials.</p>
+  <p>It is also possible to send non-confidential headers (such as the name of a dataset, an organization, or a feed) via the <code>additional exporter headers</code>.</p>
+  <p>Headers set in the <code>OTEL_EXPORTER_OTLP_HEADERS</code> environment variable are still sent, which is convenient for container deployments. A header configured on the node takes precedence over the environment for the same name.</p>
+  <hr/>
+  <h4>Custom span attributes</h4>
   <p>You can add your own attributes to the generated spans by adding:<ul>
     <li>the <code>flow</code> identifier involved (you can leave this field empty to use in all flows),</li>
     <li>the <code>nodeType</code> involved (examples: <code>http in</code>, <code>http request</code>, <code>file in</code>, ... , you can leave this field empty to use in all node types),</li>
     <li>an <a href="https://opentelemetry.io/docs/concepts/signals/traces/#attributes" target="_blank" rel="noopener noreferrer">OTEL span attribute <code>key</code></a> (<code>node_red.action</code> for example)</li>
     <li>the <code>path</code> in the processed message object in <a href="https://jmespath.org/" target="_blank" rel="noopener noreferrer">JMESPath syntax</a>, starting after <code>msg.</code> (<code>payload.action</code> for example); alternatively, you can specify the attribute value as a fixed string enclosed in single or double quotes (e.g., <code>"myValue"</code>)</li>
   </ul></p>
-  <h3>Span nesting</h3>
-  <p>By default every node span is a child of the local root span, which gives a flat timeline that is easy to read and shows at a glance where the time went.</p>
-  <p>With <code>nest spans</code> ticked, a node span is instead a child of the span of the node that sent it the message, so the trace follows the wiring of your flow. That suits tracking the path a message took, or building a dependency graph, at the cost of a deeper and busier waterfall. A chain deeper than 50 restarts from the local root span, so a long loop cannot bury itself.</p>
+  <hr/>
+  <h4>Span nesting</h4>
+  <p>By default, every node span is a child of the local root span, resulting in a flat timeline that is easy to read and allows you to see at a glance where time has elapsed.</p>
+  <p>With <code>nest spans</code> checked, a node span becomes a child of the span of the node that sent it the message. This allows you to trace the path taken by a message or build a dependency graph, at the cost of a deeper waterfall. A chain with more than 50 levels restarts from the local root span.</p>
+  <hr/>
+  <h4>Note</h4>
   <p>This node should only be added once for all your Node-Red flows (regardless of location).</p>
   <h3>References</h3>
   <ul>
     <li><a href="https://opentelemetry.io/docs/" target="_blank" rel="noopener noreferrer">OpenTelemetry docs</a> - full description of OpenTelemetry.</li>
     <li><a href="https://github.com/nioc/node-red-contrib-opentelemetry" target="_blank" rel="noopener noreferrer">Node homepage</a> - doc, issues and releases.</li>
+    <li><a href="https://flows.nodered.org/node/node-red-contrib-opentelemetry" target="_blank" rel="noopener noreferrer">Node on Node-RED library</a> - add to collection, rate (it's always nice to hear from you).</li>
   </ul>
 </script>

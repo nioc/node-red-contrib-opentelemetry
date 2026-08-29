@@ -1,15 +1,3 @@
-/**
- * A minimal stand-in for the Node-RED runtime, reproducing the hook sequence of a real
- * message delivery:
- *
- *   onSend -> (clone) -> preDeliver -> postDeliver -> [next tick] onReceive -> handler -> postReceive
- *
- * with `onComplete` triggered by the node calling `done()`. `postDeliver` firing before
- * `onReceive`, and `onComplete` carrying the message the node *received*, both matter to the
- * span lifecycle, so they are reproduced exactly (see Flow.js `handlePreDeliver` and
- * Node.js `_emitInput` / `_complete` in node-red).
- */
-
 const { ExportResultCode } = require('@opentelemetry/core')
 
 /** Spans handed to the exporter, reset by each `startRuntime` call */
@@ -30,9 +18,7 @@ class CollectingExporter {
   }
 }
 
-// The node requires its exporter lazily, so pre-seeding the module cache is enough to keep
-// spans in memory. The exported bindings are getters, so assigning on the real module object
-// would silently do nothing (and the spans would be sent to a real collector).
+// The node requires its exporter lazily, so pre-seeding the module cache is enough to keep spans in memory. The exported bindings are getters, so assigning on the real module object would silently do nothing (and the spans would be sent to a real collector).
 for (const exporterModule of ['@opentelemetry/exporter-trace-otlp-http', '@opentelemetry/exporter-trace-otlp-proto']) {
   const filename = require.resolve(exporterModule)
   // eslint-disable-next-line security/detect-object-injection
@@ -73,6 +59,14 @@ function cloneMessage (msg) {
   return clone
 }
 
+/**
+ * A minimal stand-in for the Node-RED runtime, reproducing the hook sequence of a real
+ * message delivery:
+ *
+ * onSend -> (clone) -> preDeliver -> postDeliver -> [next tick] onReceive -> handler -> postReceive
+ *
+ * with `onComplete` triggered by the node calling `done()`. `postDeliver` firing before `onReceive`, and `onComplete` carrying the message the node *received*, both matter to the span lifecycle, so they are reproduced exactly (see Flow.js `handlePreDeliver` and Node.js `_emitInput` / `_complete` in node-red).
+ */
 class MiniRed {
   /**
    * @param {object} [config] Overrides of the OpenTelemetry node configuration
@@ -165,8 +159,7 @@ class MiniRed {
   }
 
   /**
-   * Register what a node does when it receives a message. The default forwards the message
-   * unchanged and reports completion, like most core nodes.
+   * Register what a node does when it receives a message. The default forwards the message unchanged and reports completion, like most core nodes.
    * @param {object} node Node definition
    * @param {(msg: any, send: (msg: any) => void, done: (error?: any) => void) => void} handler
    */
@@ -177,9 +170,7 @@ class MiniRed {
   /**
    * Emit a message from a node, as `node.send()` does
    * @param {object} source Source node definition
-   * @param {any|any[]} msgOrArray Message to emit, or one message per output port with
-   *   `null` for the ports that emit nothing. A fresh `_msgid` is minted for any message
-   *   that has none, as Node-RED's `Node.prototype.send` does.
+   * @param {any|any[]} msgOrArray Message to emit, or one message per output port with `null` for the ports that emit nothing. A fresh `_msgid` is minted for any message that has none, as Node-RED's `Node.prototype.send` does.
    */
   send (source, msgOrArray) {
     const perPort = Array.isArray(msgOrArray) ? msgOrArray : [msgOrArray]
@@ -258,8 +249,7 @@ class MiniRed {
         (error) => this.complete(node, msg, error),
       )
     } catch (error) {
-      // a function node that throws is reported as `done(err)`, which is what puts the error on
-      // the span. `node.error()` alone would only route to a catch node (not modelled here).
+      // a function node that throws is reported as `done(err)`, which is what puts the error on the span. `node.error()` alone would only route to a catch node (not modelled here).
       this.complete(node, msg, error)
     }
     this.hooks.postReceive(receiveEvent)
@@ -280,8 +270,7 @@ class MiniRed {
    * @returns {Promise<import('@opentelemetry/sdk-trace-base').ReadableSpan[]>}
    */
   async stop () {
-    // a run is closed once the current turn has settled, so give the runtime that turn before
-    // shutting down, exactly as it would get between two deliveries
+    // a run is closed once the current turn has settled, so give the runtime that turn before shutting down, exactly as it would get between two deliveries
     await settle()
     await this.closeHandler()
     return exportedSpans.slice()
