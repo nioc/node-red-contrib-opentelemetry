@@ -22,7 +22,7 @@ When writing some code, lint it with [provided rules](.eslintrc.json): `pnpm run
 > [!IMPORTANT]
 > your pull request will not be merged until checks succeed.
 
-Add relevant comments to the code, trying to keep them concise.
+Add relevant comments to the code, trying to keep them concise. If the comment is long, don't use line breaks too frequently (150 characters is okay).
 
 #### Commits message
 
@@ -32,3 +32,7 @@ Read [conventional commits](https://www.conventionalcommits.org/) and write your
 
 Before packaging, the application's functionality is validated by a set of tests.
 It is strongly recommended that you include tests for your new features or update existing tests affected by your changes.
+
+#### AI
+
+I'm not a big fan of AI-generated code (especially because of its environmental impact), but if you plan to use it, please mention it in the discussion. Of course, you must understand the generated code and be able to justify the choices made. The commits you push to your PR will be **your responsibility**, not the AI's; make sure your commits do not mention the tool in a `Co-Authored-By` field.
