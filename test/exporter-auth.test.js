@@ -1,4 +1,4 @@
-/**
+/*
  * Exporter authentication, checked against a real OTLP request.
  *
  * The exporter is the real one here, so the assertions are on the headers a collector actually

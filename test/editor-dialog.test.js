@@ -1,11 +1,8 @@
-/**
+/*
  * The edit dialog, exercised against stubs for jQuery and the Node-RED editor.
  *
- * `oneditprepare` builds two editable lists. If it throws part way through, every list after
- * the failure is left uninitialised and the dialog silently loses those sections, so what
- * matters here is that it survives a node whose newer properties are missing: the editor only
- * fills defaults in on import, not when loading the flows it already has
- * (`applyNodeDefaults` defaults to false).
+ * `oneditprepare` builds two editable lists. If it throws part way through, every list after the failure is left uninitialised and the dialog silently loses those sections, so what
+ * matters here is that it survives a node whose newer properties are missing: the editor only fills defaults in on import, not when loading the flows it already has (`applyNodeDefaults` defaults to false).
  */
 const test = require('node:test')
 const assert = require('node:assert/strict')
